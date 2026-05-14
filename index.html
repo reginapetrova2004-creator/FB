@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>ФОТОБАЗА — облачная версия (ImgBB + Supabase)</title>
+    <title>ФОТОБАЗА — быстрая облачная версия</title>
     <link rel="stylesheet" href="style3.css">
 </head>
 <body>
@@ -87,13 +87,11 @@
 <script type="module">
   import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm'
 
-  // ========== НАСТРОЙКИ SUPABASE ==========
+  // ========== НАСТРОЙКИ ==========
   const supabaseUrl = 'https://meojfwicdormzamubexr.supabase.co'
   const supabaseKey = 'sb_publishable_azTxzoKa32Kq4mDP5EYmxQ_BZ2zot5w'
   const supabase = createClient(supabaseUrl, supabaseKey)
-
-  // ========== НАСТРОЙКИ IMGBB ==========
-  const IMGBB_API_KEY = '7b8f4248b23e8ae808a7092532439bc0'; 
+  const IMGBB_API_KEY = '7b8f4248b23e8ae808a7092532439bc0'
 
   // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
   let appData = { folders: {} }
@@ -105,6 +103,7 @@
   let settings = { theme: 'light', thumbSize: 'medium' }
   const SETTINGS_KEY = 'photobase_settings_v3'
   
+  // DOM элементы
   const foldersListEl = document.getElementById('foldersList')
   const emptyMsgDiv = document.getElementById('emptyFolderMessage')
   const createBtn = document.getElementById('createFolderBtn')
@@ -124,6 +123,7 @@
   const quickAddBtn = document.getElementById('quickAddBtn')
   const deleteBtn = document.getElementById('deleteBtn')
   
+  // Модалка
   const modalOverlay = document.getElementById('modalOverlay')
   const modalTitle = document.getElementById('modalTitle')
   const modalBody = document.getElementById('modalBody')
@@ -149,6 +149,7 @@
   
   function escapeHtml(str) { return String(str || '').replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m])) }
   
+  // Настройки темы и размера
   function loadSettings() {
     const stored = localStorage.getItem(SETTINGS_KEY)
     if (stored) try { settings = JSON.parse(stored) } catch(e) {}
@@ -167,7 +168,7 @@
     document.documentElement.style.setProperty('--thumb-size', sz)
   }
   
-  // ========== РАБОТА С SUPABASE (только метаданные) ==========
+  // ========== ЗАГРУЗКА ПРИ СТАРТЕ (один раз) ==========
   async function loadFromSupabase() {
     try {
       const { data: folders, error: foldersError } = await supabase
@@ -197,76 +198,159 @@
       appData.folders = newFolders
       renderFolders()
       renderGallery()
-      console.log('✅ Данные загружены из Supabase')
+      console.log('✅ Данные загружены')
     } catch (err) {
-      console.error('Ошибка загрузки из Supabase:', err)
-      alert('Не удалось загрузить данные. Проверьте подключение к Supabase.')
+      console.error('Ошибка загрузки:', err)
+      alert('Не удалось загрузить данные')
     }
   }
   
+  // ========== ЛОКАЛЬНЫЕ ОБНОВЛЕНИЯ БЕЗ ПОЛНОЙ ПЕРЕЗАГРУЗКИ ==========
+  function addFolderToLocal(folderName) {
+    if (appData.folders[folderName]) return false
+    appData.folders[folderName] = { photos: [], createdAt: Date.now() }
+    renderFolders()
+    return true
+  }
+  
+  function addPhotosToLocal(folderName, newPhotos) {
+    if (!appData.folders[folderName]) appData.folders[folderName] = { photos: [] }
+    appData.folders[folderName].photos.push(...newPhotos)
+    if (currentFolder === folderName || currentMode === 'all') renderGallery()
+    renderFolders() // обновит счётчики
+  }
+  
+  function deleteFolderFromLocal(folderName) {
+    delete appData.folders[folderName]
+    if (currentFolder === folderName) currentFolder = null
+    renderFolders()
+    renderGallery()
+  }
+  
+  function deletePhotoFromLocal(folderName, photoId) {
+    const folder = appData.folders[folderName]
+    if (!folder) return
+    const idx = folder.photos.findIndex(p => p.id === photoId)
+    if (idx !== -1) folder.photos.splice(idx, 1)
+    renderFolders()
+    renderGallery()
+  }
+  
+  function renameFolderInLocal(oldName, newName) {
+    if (oldName === newName) return
+    if (appData.folders[newName]) return false
+    const folderData = appData.folders[oldName]
+    if (!folderData) return false
+    appData.folders[newName] = folderData
+    delete appData.folders[oldName]
+    // обновляем folder_name в каждом фото локально
+    for (const photo of folderData.photos) {
+      photo.folderName = newName
+    }
+    if (currentFolder === oldName) currentFolder = newName
+    renderFolders()
+    renderGallery()
+    return true
+  }
+  
+  function updatePhotoInLocal(photoId, newTag, newDesc) {
+    for (const folderName in appData.folders) {
+      const photo = appData.folders[folderName].photos.find(p => p.id === photoId)
+      if (photo) {
+        photo.tag = newTag
+        photo.desc = newDesc
+        break
+      }
+    }
+    renderGallery()
+  }
+  
+  // ========== РАБОТА С СЕРВЕРОМ (асинхронно, не блокирует UI) ==========
   async function createFolderInSupabase(folderName) {
     const { error } = await supabase.from('folders').insert({ name: folderName })
     if (error) {
       alert('Ошибка создания папки: ' + error.message)
       return false
     }
-    await loadFromSupabase()
+    addFolderToLocal(folderName)
     currentFolder = folderName
     if (currentMode !== 'folder') setMode('folder')
     return true
   }
   
-  // Новая версия addPhotoToSupabase — через ImgBB
   async function addPhotoToSupabase(folderName, files, tag, desc) {
-    for (const file of files) {
-      const formData = new FormData()
-      formData.append('image', file)
-      
-      try {
+    if (!files.length) return
+    
+    // Показываем индикатор загрузки
+    const loadingMsg = document.createElement('div')
+    loadingMsg.className = 'loading-indicator'
+    loadingMsg.textContent = '⏳ Загрузка фото на ImgBB...'
+    loadingMsg.style.position = 'fixed'
+    loadingMsg.style.bottom = '80px'
+    loadingMsg.style.left = '50%'
+    loadingMsg.style.transform = 'translateX(-50%)'
+    loadingMsg.style.background = 'var(--bg-surface)'
+    loadingMsg.style.padding = '8px 16px'
+    loadingMsg.style.borderRadius = '40px'
+    loadingMsg.style.zIndex = '1000'
+    loadingMsg.style.backdropFilter = 'blur(8px)'
+    document.body.appendChild(loadingMsg)
+    
+    try {
+      // 1. Параллельная загрузка всех файлов на ImgBB
+      const uploadPromises = files.map(async (file) => {
+        const formData = new FormData()
+        formData.append('image', file)
         const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
           method: 'POST',
           body: formData
         })
         const result = await response.json()
-        
-        if (!result.success) {
-          alert(`Ошибка ImgBB: ${result.error.message}`)
-          continue
-        }
-        
-        const imageUrl = result.data.url
-        
-        const { error: dbError } = await supabase
-          .from('photos')
-          .insert({
-            folder_name: folderName,
-            image_url: imageUrl,
-            tag: tag,
-            description: desc
-          })
-        
-        if (dbError) {
-          alert(`Ошибка сохранения в БД: ${dbError.message}`)
-        } else {
-          console.log(`Фото ${file.name} загружено, ссылка: ${imageUrl}`)
-        }
-      } catch (err) {
-        alert(`Ошибка загрузки ${file.name}: ${err.message}`)
-      }
+        if (!result.success) throw new Error(result.error.message)
+        return result.data.url
+      })
+      const imageUrls = await Promise.all(uploadPromises)
+      
+      // 2. Вставляем все ссылки одной операцией в Supabase
+      const records = imageUrls.map(url => ({
+        folder_name: folderName,
+        image_url: url,
+        tag: tag,
+        description: desc
+      }))
+      const { data: inserted, error: dbError } = await supabase
+        .from('photos')
+        .insert(records)
+        .select()
+      
+      if (dbError) throw new Error(dbError.message)
+      
+      // 3. Добавляем фото в локальное состояние (с полученными id)
+      const newPhotos = inserted.map(p => ({
+        id: p.id,
+        url: p.image_url,
+        tag: p.tag || '',
+        desc: p.description || '',
+        createdAt: p.created_at
+      }))
+      addPhotosToLocal(folderName, newPhotos)
+      
+    } catch (err) {
+      alert(`Ошибка: ${err.message}`)
+    } finally {
+      loadingMsg.remove()
     }
-    await loadFromSupabase()
   }
   
   async function deleteFolderPermanently(folderName) {
     await supabase.from('photos').delete().eq('folder_name', folderName)
     await supabase.from('folders').delete().eq('name', folderName)
-    await loadFromSupabase()
-    if (currentFolder === folderName) currentFolder = null
+    deleteFolderFromLocal(folderName)
   }
   
-  async function deletePhotoPermanently(photoId) {
+  async function deletePhotoPermanently(folderName, photoId) {
     await supabase.from('photos').delete().eq('id', photoId)
-    await loadFromSupabase()
+    deletePhotoFromLocal(folderName, photoId)
   }
   
   async function renameFolderInSupabase(oldName, newName) {
@@ -282,12 +366,8 @@
       alert('Ошибка переименования: ' + updateError.message)
       return false
     }
-    await supabase
-      .from('photos')
-      .update({ folder_name: newName })
-      .eq('folder_name', oldName)
-    await loadFromSupabase()
-    currentFolder = newName
+    await supabase.from('photos').update({ folder_name: newName }).eq('folder_name', oldName)
+    renameFolderInLocal(oldName, newName)
     return true
   }
   
@@ -297,10 +377,10 @@
       .update({ tag: newTag, description: newDesc })
       .eq('id', photoId)
     if (error) alert('Ошибка обновления: ' + error.message)
-    else await loadFromSupabase()
+    else updatePhotoInLocal(photoId, newTag, newDesc)
   }
   
-  // ========== ОТРИСОВКА (без изменений) ==========
+  // ========== ОТРИСОВКА (без изменений, но быстрая) ==========
   function getFilteredFolders() {
     let folders = Object.keys(appData.folders)
     if (searchQuery.trim()) {
@@ -445,8 +525,15 @@
       btn.onclick = async (e) => {
         e.stopPropagation()
         const photoId = parseInt(btn.dataset.id)
+        let folderName = currentFolder
+        if (!folderName) {
+          // ищем папку в allPhotos режиме
+          const card = btn.closest('.photo-card')
+          folderName = card?.dataset.folder
+        }
+        if (!folderName) return
         if (confirm('Удалить фото навсегда?')) {
-          await deletePhotoPermanently(photoId)
+          await deletePhotoPermanently(folderName, photoId)
         }
       }
     })
@@ -597,7 +684,7 @@
     let rows = ''
     for (let fn in appData.folders) {
       const f = appData.folders[fn]
-      rows += `<tr style="background:var(--accent-soft);"><td colspan="4"><strong>📁 ${escapeHtml(fn)}</strong> (${f.photos.length} фото) </td></tr>`
+      rows += `<tr style="background:var(--accent-soft);"><td colspan="4"><strong>📁 ${escapeHtml(fn)}</strong> (${f.photos.length} фото)  </td></tr>`
       f.photos.forEach((p, i) => {
         rows += `<tr><td>${i+1}</td><td><img src="${p.url}" style="width:40px; height:40px; object-fit:cover; border-radius:8px;"></td><td>${escapeHtml(p.tag)}</td><td>${escapeHtml(p.desc)}</td></tr>`
       })
@@ -607,11 +694,14 @@
   }
   
   function showHelp() {
-    const helpHtml = `<div>📖 Функционал: создание папок, добавление фото с тегами/описанием, поиск, сортировка, тёмная тема. Фото хранятся на ImgBB, метаданные в Supabase.</div>`
+    const helpHtml = `<div>📖 Функционал: создание папок, добавление фото с тегами/описанием, поиск, сортировка, тёмная тема. Фото хранятся на ImgBB, метаданные в Supabase. Работает быстро благодаря локальному обновлению.</div>`
     showModal('Справка', helpHtml, false, true)
   }
   
-  function demoUpdate() { alert('🔄 Данные синхронизированы с облаком') }
+  function demoUpdate() { 
+    alert('🔄 Принудительная синхронизация с облаком...')
+    loadFromSupabase()
+  }
   
   function setMode(mode) {
     currentMode = mode
@@ -636,6 +726,7 @@
     renderGallery()
   }
   
+  // ========== НАЗНАЧЕНИЕ ОБРАБОТЧИКОВ ==========
   createBtn.onclick = async () => {
     const html = `<input type="text" id="folderName" placeholder="Название папки" style="width:100%; padding:10px;">`
     const ok = await showModal('Создать папку', html, true, true)
@@ -660,6 +751,7 @@
   quickAddBtn.onclick = quickAdd
   deleteBtn.onclick = () => alert('Удаление происходит сразу с подтверждением.')
   
+  // ========== СТАРТ ==========
   loadSettings()
   await loadFromSupabase()
   if (!Object.keys(appData.folders).length) currentFolder = null
