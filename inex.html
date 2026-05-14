@@ -229,20 +229,41 @@
   
   // Добавление одного или нескольких фото
   async function addPhotoToSupabase(folderName, files, tag, desc) {
-    for (const file of files) {
-      // Генерируем уникальное имя файла
-      const ext = file.name.split('.').pop()
-      const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`
-      const filePath = `${folderName}/${fileName}`
-      
-      // Загружаем файл в Storage
-      const { error: uploadError } = await supabase.storage
-        .from('photos')
-        .upload(filePath, file)
-      if (uploadError) {
-        alert(`Ошибка загрузки файла ${file.name}: ${uploadError.message}`)
-        continue
-      }
+  for (const file of files) {
+    // Очищаем имя папки: заменяем пробелы и кириллицу на _
+    const safeFolder = folderName.replace(/[^a-z0-9_-]/gi, '_').toLowerCase();
+    const ext = file.name.split('.').pop();
+    const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
+    const filePath = `${safeFolder}/${fileName}`;
+    
+    console.log('Uploading to path:', filePath); // для отладки
+    
+    const { error: uploadError } = await supabase.storage
+      .from('photos')
+      .upload(filePath, file);
+    
+    if (uploadError) {
+      alert(`Ошибка загрузки файла ${file.name}: ${uploadError.message}`);
+      continue;
+    }
+    
+    const { data: publicUrlData } = supabase.storage
+      .from('photos')
+      .getPublicUrl(filePath);
+    
+    const { error: dbError } = await supabase
+      .from('photos')
+      .insert({
+        folder_name: folderName,
+        image_url: publicUrlData.publicUrl,
+        tag: tag,
+        description: desc
+      });
+    
+    if (dbError) alert(`Ошибка сохранения данных: ${dbError.message}`);
+  }
+  await loadFromSupabase();
+}
       
       // Получаем публичную ссылку
       const { data: publicUrlData } = supabase.storage
