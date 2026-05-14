@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>ФОТОБАЗА — облачная версия с Supabase</title>
+    <title>ФОТОБАЗА — облачная версия</title>
     <link rel="stylesheet" href="style3.css">
 </head>
 <body>
@@ -70,7 +70,6 @@
     </footer>
 </div>
 
-<!-- Модальное окно -->
 <div id="modalOverlay" class="modal-overlay" style="display: none;">
     <div class="modal-content">
         <div class="modal-header">
@@ -85,679 +84,611 @@
     </div>
 </div>
 
+<script type="importmap">
+    {
+        "imports": {
+            "@supabase/supabase-js": "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm"
+        }
+    }
+</script>
+
 <script type="module">
-  import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm'
+    import { createClient } from '@supabase/supabase-js';
 
-  // ========== НАСТРОЙКИ SUPABASE ==========
-  const supabaseUrl = 'https://meojfwicdormzamubexr.supabase.co'
-  const supabaseKey = 'sb_publishable_azTxzoKa32Kq4mDP5EYmxQ_BZ2zot5w'
-  const supabase = createClient(supabaseUrl, supabaseKey)
+    // ========== НАСТРОЙКИ SUPABASE ==========
+    const supabaseUrl = 'https://meojfwicdormzamubexr.supabase.co';
+    const supabaseKey = 'sb_publishable_azTxzoKa32Kq4mDP5EYmxQ_BZ2zot5w';
+    const supabase = createClient(supabaseUrl, supabaseKey);
 
-  // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
-  let appData = { folders: {} }      // структура: { folderName: { photos: [], createdAt } }
-  let currentFolder = null
-  let currentMode = 'folder'
-  let searchQuery = ''
-  let currentSort = 'name_asc'
-  
-  // Настройки (тема и размер миниатюр — локально)
-  let settings = { theme: 'light', thumbSize: 'medium' }
-  const SETTINGS_KEY = 'photobase_settings_v3'
-  
-  // DOM элементы
-  const foldersListEl = document.getElementById('foldersList')
-  const emptyMsgDiv = document.getElementById('emptyFolderMessage')
-  const createBtn = document.getElementById('createFolderBtn')
-  const folderContentView = document.getElementById('folderContentView')
-  const addPhotoBtn = document.getElementById('addPhotoBtn')
-  const modeFolderBtn = document.getElementById('modeFolderBtn')
-  const modeAllBtn = document.getElementById('modeAllBtn')
-  const searchInput = document.getElementById('searchInput')
-  const searchBtn = document.getElementById('searchBtn')
-  const sortSelect = document.getElementById('sortSelect')
-  const settingsBtn = document.getElementById('settingsBtn')
-  const databaseBtn = document.getElementById('databaseBtn')
-  const questionBtn = document.getElementById('questionBtn')
-  const exportBtn = document.getElementById('exportBtn')
-  const editBtn = document.getElementById('editBtn')
-  const updateBtn = document.getElementById('updateBtn')
-  const quickAddBtn = document.getElementById('quickAddBtn')
-  const deleteBtn = document.getElementById('deleteBtn')
-  
-  // Модалка
-  const modalOverlay = document.getElementById('modalOverlay')
-  const modalTitle = document.getElementById('modalTitle')
-  const modalBody = document.getElementById('modalBody')
-  const modalConfirm = document.getElementById('modalConfirmBtn')
-  const modalCancel = document.getElementById('modalCancelBtn')
-  let modalResolve = null
-  function showModal(title, html, showConfirm = true, showCancel = true) {
-    return new Promise(resolve => {
-      modalTitle.innerText = title
-      modalBody.innerHTML = html
-      modalConfirm.style.display = showConfirm ? 'inline-flex' : 'none'
-      modalCancel.style.display = showCancel ? 'inline-flex' : 'none'
-      modalOverlay.style.display = 'flex'
-      modalResolve = resolve
-    })
-  }
-  function closeModal(result) { modalOverlay.style.display = 'none'; if (modalResolve) modalResolve(result); modalResolve = null }
-  modalConfirm.onclick = () => closeModal(true)
-  modalCancel.onclick = () => closeModal(false)
-  document.querySelector('.modal-close').onclick = () => closeModal(false)
-  modalOverlay.onclick = (e) => { if (e.target === modalOverlay) closeModal(false) }
-  
-  // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
-  function escapeHtml(str) { return String(str || '').replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m])) }
-  
-  // Загрузка настроек (тема, размер)
-  function loadSettings() {
-    const stored = localStorage.getItem(SETTINGS_KEY)
-    if (stored) try { settings = JSON.parse(stored) } catch(e) {}
-    applyTheme()
-    applyThumbSize()
-  }
-  function saveSettings() { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)) }
-  function applyTheme() {
-    if (settings.theme === 'dark') document.body.classList.add('dark-theme')
-    else document.body.classList.remove('dark-theme')
-  }
-  function applyThumbSize() {
-    let sz = '140px'
-    if (settings.thumbSize === 'small') sz = '100px'
-    if (settings.thumbSize === 'large') sz = '200px'
-    document.documentElement.style.setProperty('--thumb-size', sz)
-  }
-  
-  // ========== ОСНОВНЫЕ ФУНКЦИИ ДЛЯ РАБОТЫ С SUPABASE ==========
-  // Загрузка всех данных из БД
-  async function loadFromSupabase() {
-    try {
-      // Загружаем папки
-      const { data: folders, error: foldersError } = await supabase
-        .from('folders')
-        .select('name, created_at')
-        .order('name', { ascending: true })
-      if (foldersError) throw foldersError
-      
-      // Загружаем все фото
-      const { data: photos, error: photosError } = await supabase
-        .from('photos')
-        .select('*')
-      if (photosError) throw photosError
-      
-      // Строим структуру appData
-      const newFolders = {}
-      for (const f of folders) {
-        newFolders[f.name] = {
-          createdAt: f.created_at || Date.now(),
-          photos: photos.filter(p => p.folder_name === f.name).map(p => ({
-            id: p.id,
-            url: p.image_url,
-            tag: p.tag || '',
-            desc: p.description || '',
-            createdAt: p.created_at
-          }))
+    // Глобальные переменные
+    let appData = { folders: {} };
+    let currentFolder = null;
+    let currentMode = 'folder';
+    let searchQuery = '';
+    let currentSort = 'name_asc';
+    
+    // Настройки (локально)
+    let settings = { theme: 'light', thumbSize: 'medium' };
+    const SETTINGS_KEY = 'photobase_settings_v3';
+    
+    // DOM элементы
+    const foldersListEl = document.getElementById('foldersList');
+    const emptyMsgDiv = document.getElementById('emptyFolderMessage');
+    const createBtn = document.getElementById('createFolderBtn');
+    const folderContentView = document.getElementById('folderContentView');
+    const addPhotoBtn = document.getElementById('addPhotoBtn');
+    const modeFolderBtn = document.getElementById('modeFolderBtn');
+    const modeAllBtn = document.getElementById('modeAllBtn');
+    const searchInput = document.getElementById('searchInput');
+    const searchBtn = document.getElementById('searchBtn');
+    const sortSelect = document.getElementById('sortSelect');
+    const settingsBtn = document.getElementById('settingsBtn');
+    const databaseBtn = document.getElementById('databaseBtn');
+    const questionBtn = document.getElementById('questionBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const editBtn = document.getElementById('editBtn');
+    const updateBtn = document.getElementById('updateBtn');
+    const quickAddBtn = document.getElementById('quickAddBtn');
+    const deleteBtn = document.getElementById('deleteBtn');
+    
+    // Модалка
+    const modalOverlay = document.getElementById('modalOverlay');
+    const modalTitle = document.getElementById('modalTitle');
+    const modalBody = document.getElementById('modalBody');
+    const modalConfirm = document.getElementById('modalConfirmBtn');
+    const modalCancel = document.getElementById('modalCancelBtn');
+    let modalResolve = null;
+    
+    function showModal(title, html, showConfirm = true, showCancel = true) {
+        return new Promise(resolve => {
+            modalTitle.innerText = title;
+            modalBody.innerHTML = html;
+            modalConfirm.style.display = showConfirm ? 'inline-flex' : 'none';
+            modalCancel.style.display = showCancel ? 'inline-flex' : 'none';
+            modalOverlay.style.display = 'flex';
+            modalResolve = resolve;
+        });
+    }
+    function closeModal(result) { 
+        modalOverlay.style.display = 'none'; 
+        if (modalResolve) modalResolve(result); 
+        modalResolve = null; 
+    }
+    modalConfirm.onclick = () => closeModal(true);
+    modalCancel.onclick = () => closeModal(false);
+    document.querySelector('.modal-close').onclick = () => closeModal(false);
+    modalOverlay.onclick = (e) => { if (e.target === modalOverlay) closeModal(false); };
+    
+    // Вспомогательные функции
+    function escapeHtml(str) { return String(str || '').replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m])); }
+    
+    function loadSettings() {
+        const stored = localStorage.getItem(SETTINGS_KEY);
+        if (stored) try { settings = JSON.parse(stored); } catch(e) {}
+        applyTheme();
+        applyThumbSize();
+    }
+    function saveSettings() { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); }
+    function applyTheme() {
+        if (settings.theme === 'dark') document.body.classList.add('dark-theme');
+        else document.body.classList.remove('dark-theme');
+    }
+    function applyThumbSize() {
+        let sz = '140px';
+        if (settings.thumbSize === 'small') sz = '100px';
+        if (settings.thumbSize === 'large') sz = '200px';
+        document.documentElement.style.setProperty('--thumb-size', sz);
+    }
+    
+    // ========== ОСНОВНЫЕ ФУНКЦИИ SUPABASE ==========
+    async function loadFromSupabase() {
+        try {
+            const { data: folders, error: foldersError } = await supabase
+                .from('folders')
+                .select('name, created_at')
+                .order('name', { ascending: true });
+            if (foldersError) throw foldersError;
+            
+            const { data: photos, error: photosError } = await supabase
+                .from('photos')
+                .select('*');
+            if (photosError) throw photosError;
+            
+            const newFolders = {};
+            for (const f of folders) {
+                newFolders[f.name] = {
+                    createdAt: f.created_at || Date.now(),
+                    photos: photos.filter(p => p.folder_name === f.name).map(p => ({
+                        id: p.id,
+                        url: p.image_url,
+                        tag: p.tag || '',
+                        desc: p.description || '',
+                        createdAt: p.created_at
+                    }))
+                };
+            }
+            appData.folders = newFolders;
+            renderFolders();
+            renderGallery();
+            console.log('✅ Данные загружены из Supabase');
+        } catch (err) {
+            console.error('Ошибка загрузки:', err);
+            alert('Не удалось загрузить данные. Проверьте консоль.');
         }
-      }
-      appData.folders = newFolders
-      
-      // Обновляем интерфейс
-      renderFolders()
-      renderGallery()
-      console.log('✅ Данные загружены из Supabase')
-    } catch (err) {
-      console.error('Ошибка загрузки из Supabase:', err)
-      alert('Не удалось загрузить данные. Проверьте подключение к Supabase.')
-    }
-  }
-  
-  // Создание папки
-  async function createFolderInSupabase(folderName) {
-    const { error } = await supabase
-      .from('folders')
-      .insert({ name: folderName })
-    if (error) {
-      alert('Ошибка создания папки: ' + error.message)
-      return false
-    }
-    await loadFromSupabase()
-    currentFolder = folderName
-    if (currentMode !== 'folder') setMode('folder')
-    return true
-  }
-  
-  // Добавление одного или нескольких фото
-  async function addPhotoToSupabase(folderName, files, tag, desc) {
-  for (const file of files) {
-    // Очищаем имя папки: заменяем пробелы и кириллицу на _
-    const safeFolder = folderName.replace(/[^a-z0-9_-]/gi, '_').toLowerCase();
-    const ext = file.name.split('.').pop();
-    const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
-    const filePath = `${safeFolder}/${fileName}`;
-    
-    console.log('Uploading to path:', filePath); // для отладки
-    
-    const { error: uploadError } = await supabase.storage
-      .from('photos')
-      .upload(filePath, file);
-    
-    if (uploadError) {
-      alert(`Ошибка загрузки файла ${file.name}: ${uploadError.message}`);
-      continue;
     }
     
-    const { data: publicUrlData } = supabase.storage
-      .from('photos')
-      .getPublicUrl(filePath);
-    
-    const { error: dbError } = await supabase
-      .from('photos')
-      .insert({
-        folder_name: folderName,
-        image_url: publicUrlData.publicUrl,
-        tag: tag,
-        description: desc
-      });
-    
-    if (dbError) alert(`Ошибка сохранения данных: ${dbError.message}`);
-  }
-  await loadFromSupabase();
-}
-      
-      // Получаем публичную ссылку
-      const { data: publicUrlData } = supabase.storage
-        .from('photos')
-        .getPublicUrl(filePath)
-      const imageUrl = publicUrlData.publicUrl
-      
-      // Сохраняем запись в таблице photos
-      const { error: dbError } = await supabase
-        .from('photos')
-        .insert({
-          folder_name: folderName,
-          image_url: imageUrl,
-          tag: tag,
-          description: desc
-        })
-      if (dbError) {
-        alert(`Ошибка сохранения данных для ${file.name}: ${dbError.message}`)
-      }
-    }
-    await loadFromSupabase()
-  }
-  
-  // Удаление папки (со всеми фото из Storage и БД)
-  async function deleteFolderPermanently(folderName) {
-    // Сначала получим все фото этой папки, чтобы удалить файлы из Storage
-    const { data: photos, error: getError } = await supabase
-      .from('photos')
-      .select('image_url')
-      .eq('folder_name', folderName)
-    if (getError) console.error('Ошибка получения фото для удаления:', getError)
-    
-    // Удаляем файлы из Storage (извлекаем путь из URL)
-    if (photos && photos.length) {
-      for (const p of photos) {
-        const url = p.image_url
-        // URL имеет вид https://.../storage/v1/object/public/photos/folderName/filename.jpg
-        const path = url.split('/public/photos/')[1]
-        if (path) {
-          await supabase.storage.from('photos').remove([path])
+    async function createFolderInSupabase(folderName) {
+        const { error } = await supabase.from('folders').insert({ name: folderName });
+        if (error) {
+            alert('Ошибка создания папки: ' + error.message);
+            return false;
         }
-      }
+        await loadFromSupabase();
+        currentFolder = folderName;
+        if (currentMode !== 'folder') setMode('folder');
+        return true;
     }
     
-    // Удаляем записи фото из БД
-    await supabase.from('photos').delete().eq('folder_name', folderName)
-    // Удаляем папку
-    await supabase.from('folders').delete().eq('name', folderName)
-    
-    await loadFromSupabase()
-    if (currentFolder === folderName) currentFolder = null
-  }
-  
-  // Удаление одного фото
-  async function deletePhotoPermanently(folderName, photoId, imageUrl) {
-    // Удаляем файл из Storage
-    const path = imageUrl.split('/public/photos/')[1]
-    if (path) {
-      await supabase.storage.from('photos').remove([path])
-    }
-    // Удаляем запись из БД
-    await supabase.from('photos').delete().eq('id', photoId)
-    await loadFromSupabase()
-  }
-  
-  // Переименование папки (обновляем имя в таблице folders и во всех связанных фото)
-  async function renameFolderInSupabase(oldName, newName) {
-    // Проверяем, нет ли уже папки с новым именем
-    if (appData.folders[newName]) {
-      alert('Папка с таким именем уже существует')
-      return false
-    }
-    // Обновляем имя папки в таблице folders
-    const { error: updateError } = await supabase
-      .from('folders')
-      .update({ name: newName })
-      .eq('name', oldName)
-    if (updateError) {
-      alert('Ошибка переименования: ' + updateError.message)
-      return false
-    }
-    // Обновляем folder_name во всех фото этой папки
-    await supabase
-      .from('photos')
-      .update({ folder_name: newName })
-      .eq('folder_name', oldName)
-    
-    await loadFromSupabase()
-    currentFolder = newName
-    return true
-  }
-  
-  // Редактирование тега/описания фото
-  async function updatePhotoMetadata(photoId, newTag, newDesc) {
-    const { error } = await supabase
-      .from('photos')
-      .update({ tag: newTag, description: newDesc })
-      .eq('id', photoId)
-    if (error) alert('Ошибка обновления: ' + error.message)
-    else await loadFromSupabase()
-  }
-  
-  // ========== ОТРИСОВКА ИНТЕРФЕЙСА ==========
-  function getFilteredFolders() {
-    let folders = Object.keys(appData.folders)
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase()
-      folders = folders.filter(f => {
-        if (f.toLowerCase().includes(q)) return true
-        const photos = appData.folders[f].photos
-        return photos.some(p => p.tag.toLowerCase().includes(q) || p.desc.toLowerCase().includes(q))
-      })
-    }
-    switch (currentSort) {
-      case 'name_asc': folders.sort((a, b) => a.localeCompare(b)); break
-      case 'name_desc': folders.sort((a, b) => b.localeCompare(a)); break
-      case 'date_asc': folders.sort((a, b) => (appData.folders[a].createdAt || 0) - (appData.folders[b].createdAt || 0)); break
-      case 'date_desc': folders.sort((a, b) => (appData.folders[b].createdAt || 0) - (appData.folders[a].createdAt || 0)); break
-      default: folders.sort((a, b) => a.localeCompare(b))
-    }
-    return folders
-  }
-  
-  function renderFolders() {
-    const filtered = getFilteredFolders()
-    foldersListEl.innerHTML = ''
-    if (!filtered.length) {
-      emptyMsgDiv.style.display = 'block'
-      foldersListEl.style.display = 'none'
-      if (currentFolder && !filtered.includes(currentFolder)) currentFolder = null
-      if (currentMode === 'folder') renderGallery()
-      return
-    }
-    emptyMsgDiv.style.display = 'none'
-    foldersListEl.style.display = 'flex'
-    filtered.forEach(f => {
-      const li = document.createElement('li')
-      li.className = 'folder-item'
-      const span = document.createElement('span')
-      span.className = 'folder-name'
-      const photoCount = appData.folders[f].photos.length
-      span.innerHTML = `${escapeHtml(f)} <span class="folder-count">${photoCount}</span>`
-      span.onclick = () => {
-        if (currentMode !== 'folder') setMode('folder')
-        currentFolder = f
-        renderGallery()
-        highlightActiveFolder(f)
-      }
-      const del = document.createElement('button')
-      del.className = 'folder-delete'
-      del.innerHTML = '✖'
-      del.title = 'Удалить папку'
-      del.onclick = async (e) => {
-        e.stopPropagation()
-        if (confirm(`Удалить папку «${f}» со всеми фотографиями навсегда?`)) {
-          await deleteFolderPermanently(f)
+    async function addPhotoToSupabase(folderName, files, tag, desc) {
+        // Очищаем имя папки для пути в Storage (только латиница, цифры, дефис, подчёркивание)
+        const safeFolder = folderName.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase();
+        
+        for (const file of files) {
+            const ext = file.name.split('.').pop();
+            const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
+            const filePath = `${safeFolder}/${fileName}`;
+            
+            const { error: uploadError } = await supabase.storage
+                .from('photos')
+                .upload(filePath, file);
+            
+            if (uploadError) {
+                alert(`Ошибка загрузки файла ${file.name}: ${uploadError.message}`);
+                continue;
+            }
+            
+            const { data: publicUrlData } = supabase.storage
+                .from('photos')
+                .getPublicUrl(filePath);
+            
+            const { error: dbError } = await supabase
+                .from('photos')
+                .insert({
+                    folder_name: folderName,
+                    image_url: publicUrlData.publicUrl,
+                    tag: tag,
+                    description: desc
+                });
+            
+            if (dbError) alert(`Ошибка сохранения данных: ${dbError.message}`);
         }
-      }
-      li.appendChild(span)
-      li.appendChild(del)
-      foldersListEl.appendChild(li)
-    })
-    if (currentMode === 'folder' && currentFolder && filtered.includes(currentFolder)) {
-      highlightActiveFolder(currentFolder)
-      renderGallery()
-    } else if (filtered.length && !currentFolder) {
-      currentFolder = filtered[0]
-      renderGallery()
-      highlightActiveFolder(currentFolder)
-    } else if (!filtered.length) {
-      currentFolder = null
-      renderGallery()
-    }
-  }
-  
-  function highlightActiveFolder(name) {
-    document.querySelectorAll('.folder-item').forEach(item => {
-      const span = item.querySelector('.folder-name')
-      if (span && span.innerText.includes(name)) {
-        item.style.background = 'var(--accent-glow)'
-        item.style.borderLeft = '3px solid var(--accent)'
-      } else {
-        item.style.background = ''
-        item.style.borderLeft = ''
-      }
-    })
-  }
-  
-  function renderGallery() {
-    if (currentMode === 'all') {
-      addPhotoBtn.style.display = 'block'
-      let allPhotos = []
-      for (let f in appData.folders) {
-        appData.folders[f].photos.forEach(p => {
-          allPhotos.push({ ...p, folderName: f })
-        })
-      }
-      if (!allPhotos.length) {
-        folderContentView.innerHTML = `<div class="folder-message">Нет фотографий ни в одной папке</div>`
-        return
-      }
-      let html = `<div class="photos-grid">`
-      allPhotos.forEach(ph => {
-        html += `
-          <div class="photo-card" data-folder="${escapeHtml(ph.folderName)}" data-id="${ph.id}">
-            <img src="${ph.url}" class="photo-thumb" loading="lazy">
-            <div class="photo-meta"><span class="photo-tag">🏷️ ${escapeHtml(ph.tag || 'без тега')}</span><span class="photo-desc">${escapeHtml(ph.desc || '')}</span></div>
-            <button class="photo-delete" data-folder="${escapeHtml(ph.folderName)}" data-id="${ph.id}" data-url="${escapeHtml(ph.url)}">✖</button>
-          </div>
-        `
-      })
-      html += `</div>`
-      folderContentView.innerHTML = html
-      attachPhotoEvents()
-      attachPhotoSelection()
-      return
+        await loadFromSupabase();
     }
     
-    // Режим одной папки
-    if (!currentFolder || !appData.folders[currentFolder]) {
-      folderContentView.innerHTML = `<div class="placeholder-icon">🗀</div><div class="folder-message">Выберите папку</div>`
-      addPhotoBtn.style.display = 'none'
-      return
-    }
-    addPhotoBtn.style.display = 'block'
-    const folder = appData.folders[currentFolder]
-    if (!folder.photos.length) {
-      folderContentView.innerHTML = `<div class="folder-message"><strong>${escapeHtml(currentFolder)}</strong><br>Нет фотографий. Нажмите «Добавить фото»</div>`
-      return
-    }
-    let html = `<div class="photos-grid">`
-    folder.photos.forEach(ph => {
-      html += `
-        <div class="photo-card" data-id="${ph.id}">
-          <img src="${ph.url}" class="photo-thumb" loading="lazy">
-          <div class="photo-meta"><span class="photo-tag">🏷️ ${escapeHtml(ph.tag || 'без тега')}</span><span class="photo-desc">${escapeHtml(ph.desc || '')}</span></div>
-          <button class="photo-delete" data-id="${ph.id}" data-url="${escapeHtml(ph.url)}">✖</button>
-        </div>
-      `
-    })
-    html += `</div>`
-    folderContentView.innerHTML = html
-    attachPhotoEvents()
-    attachPhotoSelection()
-  }
-  
-  function attachPhotoEvents() {
-    document.querySelectorAll('.photo-delete').forEach(btn => {
-      btn.onclick = async (e) => {
-        e.stopPropagation()
-        const folderName = currentMode === 'all' ? btn.dataset.folder : currentFolder
-        const photoId = parseInt(btn.dataset.id)
-        const imageUrl = btn.dataset.url
-        if (confirm('Удалить фото навсегда?')) {
-          await deletePhotoPermanently(folderName, photoId, imageUrl)
+    async function deleteFolderPermanently(folderName) {
+        const { data: photos, error: getError } = await supabase
+            .from('photos')
+            .select('image_url')
+            .eq('folder_name', folderName);
+        if (!getError && photos) {
+            for (const p of photos) {
+                const path = p.image_url.split('/public/photos/')[1];
+                if (path) await supabase.storage.from('photos').remove([path]);
+            }
         }
-      }
-    })
-  }
-  
-  function attachPhotoSelection() {
-    document.querySelectorAll('.photo-card').forEach(card => {
-      card.onclick = (e) => {
-        if (e.target.classList.contains('photo-delete')) return
-        document.querySelectorAll('.photo-card').forEach(c => c.classList.remove('selected'))
-        card.classList.add('selected')
-      }
-    })
-  }
-  
-  // Редактирование выбранного фото
-  async function editSelectedPhoto() {
-    const selectedCard = document.querySelector('.photo-card.selected')
-    if (!selectedCard) { alert('Сначала кликните на фото, чтобы его выделить'); return }
-    let photoId, currentTag, currentDesc
-    if (currentMode === 'all') {
-      const folderName = selectedCard.dataset.folder
-      photoId = parseInt(selectedCard.dataset.id)
-      const photo = appData.folders[folderName]?.photos.find(p => p.id === photoId)
-      if (!photo) return
-      currentTag = photo.tag
-      currentDesc = photo.desc
-    } else {
-      photoId = parseInt(selectedCard.dataset.id)
-      const photo = appData.folders[currentFolder]?.photos.find(p => p.id === photoId)
-      if (!photo) return
-      currentTag = photo.tag
-      currentDesc = photo.desc
+        await supabase.from('photos').delete().eq('folder_name', folderName);
+        await supabase.from('folders').delete().eq('name', folderName);
+        await loadFromSupabase();
+        if (currentFolder === folderName) currentFolder = null;
     }
-    const html = `
-      <div style="display:flex; flex-direction:column; gap:12px;">
-        <input type="text" id="editTag" value="${escapeHtml(currentTag)}" placeholder="Тег" style="padding:10px; border-radius:12px;">
-        <textarea id="editDesc" rows="3" placeholder="Описание" style="padding:10px; border-radius:12px;">${escapeHtml(currentDesc)}</textarea>
-      </div>
-    `
-    const ok = await showModal('Редактировать фото', html, true, true)
-    if (ok) {
-      const newTag = document.getElementById('editTag').value.trim()
-      const newDesc = document.getElementById('editDesc').value.trim()
-      await updatePhotoMetadata(photoId, newTag, newDesc)
+    
+    async function deletePhotoPermanently(folderName, photoId, imageUrl) {
+        const path = imageUrl.split('/public/photos/')[1];
+        if (path) await supabase.storage.from('photos').remove([path]);
+        await supabase.from('photos').delete().eq('id', photoId);
+        await loadFromSupabase();
     }
-  }
-  
-  // Переименование папки
-  async function renameFolder() {
-    if (!currentFolder) { alert('Выберите папку'); return }
-    const html = `<input type="text" id="newFolderName" value="${escapeHtml(currentFolder)}" style="width:100%; padding:10px; border-radius:12px;">`
-    const ok = await showModal('Переименовать папку', html, true, true)
-    if (ok) {
-      const newName = document.getElementById('newFolderName').value.trim()
-      if (newName && newName !== currentFolder) {
-        await renameFolderInSupabase(currentFolder, newName)
-      } else if (!newName) alert('Имя не может быть пустым')
+    
+    async function renameFolderInSupabase(oldName, newName) {
+        if (appData.folders[newName]) {
+            alert('Папка с таким именем уже существует');
+            return false;
+        }
+        const { error: updateError } = await supabase
+            .from('folders')
+            .update({ name: newName })
+            .eq('name', oldName);
+        if (updateError) {
+            alert('Ошибка переименования: ' + updateError.message);
+            return false;
+        }
+        await supabase.from('photos').update({ folder_name: newName }).eq('folder_name', oldName);
+        await loadFromSupabase();
+        currentFolder = newName;
+        return true;
     }
-  }
-  
-  // Добавление фото через модалку
-  async function showAddPhotoDialog(targetFolder) {
-    const html = `
-      <div style="display:flex; flex-direction:column; gap:14px;">
-        <input type="file" id="photoFilesInput" accept="image/*" multiple style="padding:6px;">
-        <input type="text" id="photoTagInput" placeholder="Тег (ключевое слово)" style="padding:10px; border-radius:12px; border:1px solid #ccc;">
-        <textarea id="photoDescInput" placeholder="Описание фотографии" rows="3" style="padding:10px; border-radius:12px; border:1px solid #ccc;"></textarea>
-        <small>Можно выбрать несколько фото. Тег и описание применятся ко всем.</small>
-      </div>
-    `
-    const ok = await showModal(`Добавить фото в папку «${escapeHtml(targetFolder)}»`, html, true, true)
-    if (!ok) return
-    const files = document.getElementById('photoFilesInput').files
-    if (!files.length) { alert('Выберите хотя бы одно изображение'); return }
-    const tag = document.getElementById('photoTagInput').value.trim()
-    const desc = document.getElementById('photoDescInput').value.trim()
-    await addPhotoToSupabase(targetFolder, files, tag, desc)
-  }
-  
-  async function quickAdd() {
-    if (currentMode === 'folder' && currentFolder) {
-      await showAddPhotoDialog(currentFolder)
-    } else if (currentMode === 'all') {
-      const foldersList = Object.keys(appData.folders)
-      if (!foldersList.length) { alert('Сначала создайте папку'); return }
-      const selectHtml = `<select id="folderSelect" style="width:100%; padding:10px;">${foldersList.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('')}</select>`
-      const ok = await showModal('Выберите папку для добавления', selectHtml, true, true)
-      if (ok) {
-        const selected = document.getElementById('folderSelect').value
-        await showAddPhotoDialog(selected)
-      }
-    } else {
-      alert('Выберите папку в левом меню или переключитесь в режим "По папкам"')
+    
+    async function updatePhotoMetadata(photoId, newTag, newDesc) {
+        const { error } = await supabase
+            .from('photos')
+            .update({ tag: newTag, description: newDesc })
+            .eq('id', photoId);
+        if (error) alert('Ошибка обновления: ' + error.message);
+        else await loadFromSupabase();
     }
-  }
-  
-  // Экспорт данных (как JSON)
-  function exportData() {
-    let dataToExport
-    if (currentMode === 'folder' && currentFolder) {
-      dataToExport = { folder: currentFolder, data: appData.folders[currentFolder] }
-    } else if (currentMode === 'all') {
-      const all = []
-      for (let f in appData.folders) {
-        appData.folders[f].photos.forEach(p => all.push({ folder: f, ...p }))
-      }
-      dataToExport = all
-    } else {
-      alert('Выберите папку в режиме "По папкам"')
-      return
+    
+    // ========== ОТРИСОВКА ИНТЕРФЕЙСА ==========
+    function getFilteredFolders() {
+        let folders = Object.keys(appData.folders);
+        if (searchQuery.trim()) {
+            const q = searchQuery.toLowerCase();
+            folders = folders.filter(f => {
+                if (f.toLowerCase().includes(q)) return true;
+                return appData.folders[f].photos.some(p => p.tag.toLowerCase().includes(q) || p.desc.toLowerCase().includes(q));
+            });
+        }
+        switch (currentSort) {
+            case 'name_asc': folders.sort((a,b) => a.localeCompare(b)); break;
+            case 'name_desc': folders.sort((a,b) => b.localeCompare(a)); break;
+            case 'date_asc': folders.sort((a,b) => (appData.folders[a].createdAt||0) - (appData.folders[b].createdAt||0)); break;
+            case 'date_desc': folders.sort((a,b) => (appData.folders[b].createdAt||0) - (appData.folders[a].createdAt||0)); break;
+            default: folders.sort((a,b) => a.localeCompare(b));
+        }
+        return folders;
     }
-    const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = currentMode === 'folder' ? `${currentFolder}.json` : 'all_photos.json'
-    a.click()
-    URL.revokeObjectURL(a.href)
-  }
-  
-  // Настройки
-  async function showSettingsDialog() {
-    const html = `
-      <div style="display:flex; flex-direction:column; gap:20px;">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <span>🌞 Тёмная тема</span>
-          <label class="switch"><input type="checkbox" id="themeCheckbox" ${settings.theme === 'dark' ? 'checked' : ''}><span class="slider"></span></label>
-        </div>
-        <div>
-          <div>Размер миниатюр</div>
-          <div style="display:flex; gap:12px; margin-top:8px;">
-            <button class="size-option ${settings.thumbSize === 'small' ? 'active-size' : ''}" data-size="small">Маленькие</button>
-            <button class="size-option ${settings.thumbSize === 'medium' ? 'active-size' : ''}" data-size="medium">Средние</button>
-            <button class="size-option ${settings.thumbSize === 'large' ? 'active-size' : ''}" data-size="large">Большие</button>
-          </div>
-        </div>
-      </div>
-      <style>
-        .switch { position:relative; display:inline-block; width:50px; height:24px; }
-        .switch input { opacity:0; width:0; height:0; }
-        .slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#ccc; border-radius:34px; transition:0.2s; }
-        .slider:before { position:absolute; content:""; height:18px; width:18px; left:3px; bottom:3px; background:white; border-radius:50%; transition:0.2s; }
-        input:checked + .slider { background:var(--accent); }
-        input:checked + .slider:before { transform:translateX(26px); }
-        .size-option { padding:6px 14px; border-radius:40px; border:none; background:var(--accent-soft); cursor:pointer; }
-        .active-size { background:var(--accent); color:white; }
-      </style>
-    `
-    const ok = await showModal('Настройки', html, true, true)
-    if (ok) {
-      const themeCheck = document.getElementById('themeCheckbox')
-      settings.theme = themeCheck.checked ? 'dark' : 'light'
-      const activeSizeBtn = document.querySelector('.size-option.active-size')
-      if (activeSizeBtn) settings.thumbSize = activeSizeBtn.dataset.size
-      saveSettings()
-      applyTheme()
-      applyThumbSize()
-      renderGallery()
+    
+    function renderFolders() {
+        const filtered = getFilteredFolders();
+        foldersListEl.innerHTML = '';
+        if (!filtered.length) {
+            emptyMsgDiv.style.display = 'block';
+            foldersListEl.style.display = 'none';
+            if (currentFolder && !filtered.includes(currentFolder)) currentFolder = null;
+            if (currentMode === 'folder') renderGallery();
+            return;
+        }
+        emptyMsgDiv.style.display = 'none';
+        foldersListEl.style.display = 'flex';
+        filtered.forEach(f => {
+            const li = document.createElement('li');
+            li.className = 'folder-item';
+            const span = document.createElement('span');
+            span.className = 'folder-name';
+            const photoCount = appData.folders[f].photos.length;
+            span.innerHTML = `${escapeHtml(f)} <span class="folder-count">${photoCount}</span>`;
+            span.onclick = () => {
+                if (currentMode !== 'folder') setMode('folder');
+                currentFolder = f;
+                renderGallery();
+                highlightActiveFolder(f);
+            };
+            const del = document.createElement('button');
+            del.className = 'folder-delete';
+            del.innerHTML = '✖';
+            del.onclick = async (e) => {
+                e.stopPropagation();
+                if (confirm(`Удалить папку «${f}» со всеми фото?`)) await deleteFolderPermanently(f);
+            };
+            li.appendChild(span);
+            li.appendChild(del);
+            foldersListEl.appendChild(li);
+        });
+        if (currentMode === 'folder' && currentFolder && filtered.includes(currentFolder)) {
+            highlightActiveFolder(currentFolder);
+            renderGallery();
+        } else if (filtered.length && !currentFolder) {
+            currentFolder = filtered[0];
+            renderGallery();
+            highlightActiveFolder(currentFolder);
+        } else if (!filtered.length) {
+            currentFolder = null;
+            renderGallery();
+        }
     }
-  }
-  
-  function showDatabase() {
-    let rows = ''
-    for (let fn in appData.folders) {
-      const f = appData.folders[fn]
-      rows += `<tr style="background:var(--accent-soft);"><td colspan="4"><strong>📁 ${escapeHtml(fn)}</strong> (${f.photos.length} фото)</td></tr>`
-      f.photos.forEach((p, i) => {
-        rows += `<tr><td>${i+1}</td><td><img src="${p.url}" style="width:40px; height:40px; object-fit:cover; border-radius:8px;"></td><td>${escapeHtml(p.tag)}</td><td>${escapeHtml(p.desc)}</td></tr>`
-      })
+    
+    function highlightActiveFolder(name) {
+        document.querySelectorAll('.folder-item').forEach(item => {
+            const span = item.querySelector('.folder-name');
+            if (span && span.innerText.includes(name)) {
+                item.style.background = 'var(--accent-glow)';
+                item.style.borderLeft = '3px solid var(--accent)';
+            } else {
+                item.style.background = '';
+                item.style.borderLeft = '';
+            }
+        });
     }
-    const html = `<table style="width:100%; border-collapse:collapse;"><thead><tr><th>#</th><th>Миниатюра</th><th>Тег</th><th>Описание</th></tr></thead><tbody>${rows}</tbody></table>`
-    showModal('База данных', html, false, true)
-  }
-  
-  function showHelp() {
-    const helpHtml = `<div style="padding:0.5rem;">📖 Полный функционал: создание папок, добавление фото с тегами/описанием, поиск по всем данным, сортировка, тёмная тема. Все данные хранятся в облаке Supabase и доступны с любого компьютера.</div>`
-    showModal('Справка', helpHtml, false, true)
-  }
-  
-  function demoUpdate() { alert('🔄 Данные синхронизированы с облаком') }
-  
-  function setMode(mode) {
-    currentMode = mode
-    if (mode === 'folder') {
-      modeFolderBtn.classList.add('active')
-      modeAllBtn.classList.remove('active')
-      if (!currentFolder) {
-        const first = getFilteredFolders()[0]
-        if (first) currentFolder = first
-      }
-    } else {
-      modeAllBtn.classList.add('active')
-      modeFolderBtn.classList.remove('active')
+    
+    function renderGallery() {
+        if (currentMode === 'all') {
+            addPhotoBtn.style.display = 'block';
+            let allPhotos = [];
+            for (let f in appData.folders) {
+                appData.folders[f].photos.forEach(p => allPhotos.push({ ...p, folderName: f }));
+            }
+            if (!allPhotos.length) {
+                folderContentView.innerHTML = `<div class="folder-message">Нет фотографий</div>`;
+                return;
+            }
+            let html = `<div class="photos-grid">`;
+            allPhotos.forEach(ph => {
+                html += `
+                    <div class="photo-card" data-folder="${escapeHtml(ph.folderName)}" data-id="${ph.id}">
+                        <img src="${ph.url}" class="photo-thumb" loading="lazy">
+                        <div class="photo-meta"><span class="photo-tag">🏷️ ${escapeHtml(ph.tag || 'без тега')}</span><span class="photo-desc">${escapeHtml(ph.desc || '')}</span></div>
+                        <button class="photo-delete" data-folder="${escapeHtml(ph.folderName)}" data-id="${ph.id}" data-url="${escapeHtml(ph.url)}">✖</button>
+                    </div>
+                `;
+            });
+            html += `</div>`;
+            folderContentView.innerHTML = html;
+            attachPhotoEvents();
+            attachPhotoSelection();
+            return;
+        }
+        
+        if (!currentFolder || !appData.folders[currentFolder]) {
+            folderContentView.innerHTML = `<div class="placeholder-icon">🗀</div><div class="folder-message">Выберите папку</div>`;
+            addPhotoBtn.style.display = 'none';
+            return;
+        }
+        addPhotoBtn.style.display = 'block';
+        const folder = appData.folders[currentFolder];
+        if (!folder.photos.length) {
+            folderContentView.innerHTML = `<div class="folder-message"><strong>${escapeHtml(currentFolder)}</strong><br>Нет фотографий. Нажмите «Добавить фото»</div>`;
+            return;
+        }
+        let html = `<div class="photos-grid">`;
+        folder.photos.forEach(ph => {
+            html += `
+                <div class="photo-card" data-id="${ph.id}">
+                    <img src="${ph.url}" class="photo-thumb" loading="lazy">
+                    <div class="photo-meta"><span class="photo-tag">🏷️ ${escapeHtml(ph.tag || 'без тега')}</span><span class="photo-desc">${escapeHtml(ph.desc || '')}</span></div>
+                    <button class="photo-delete" data-id="${ph.id}" data-url="${escapeHtml(ph.url)}">✖</button>
+                </div>
+            `;
+        });
+        html += `</div>`;
+        folderContentView.innerHTML = html;
+        attachPhotoEvents();
+        attachPhotoSelection();
     }
-    renderGallery()
-    renderFolders()
-  }
-  
-  function performSearch() {
-    searchQuery = searchInput.value
-    renderFolders()
-    renderGallery()
-  }
-  
-  // ========== НАЗНАЧЕНИЕ ОБРАБОТЧИКОВ ==========
-  createBtn.onclick = async () => {
-    const html = `<input type="text" id="folderName" placeholder="Название папки" style="width:100%; padding:10px; border-radius:12px;">`
-    const ok = await showModal('Создать папку', html, true, true)
-    if (ok) {
-      const name = document.getElementById('folderName').value.trim()
-      if (name && !appData.folders[name]) {
-        await createFolderInSupabase(name)
-      } else alert('Некорректное имя или уже существует')
+    
+    function attachPhotoEvents() {
+        document.querySelectorAll('.photo-delete').forEach(btn => {
+            btn.onclick = async (e) => {
+                e.stopPropagation();
+                const folderName = currentMode === 'all' ? btn.dataset.folder : currentFolder;
+                const photoId = parseInt(btn.dataset.id);
+                const imageUrl = btn.dataset.url;
+                if (confirm('Удалить фото навсегда?')) await deletePhotoPermanently(folderName, photoId, imageUrl);
+            };
+        });
     }
-  }
-  addPhotoBtn.onclick = () => { if (currentFolder) showAddPhotoDialog(currentFolder); else alert('Выберите папку') }
-  modeFolderBtn.onclick = () => setMode('folder')
-  modeAllBtn.onclick = () => setMode('all')
-  searchBtn.onclick = performSearch
-  searchInput.onkeyup = (e) => { if (e.key === 'Enter') performSearch() }
-  sortSelect.onchange = (e) => { currentSort = e.target.value; renderFolders(); renderGallery() }
-  settingsBtn.onclick = showSettingsDialog
-  databaseBtn.onclick = showDatabase
-  questionBtn.onclick = showHelp
-  exportBtn.onclick = exportData
-  editBtn.onclick = renameFolder
-  updateBtn.onclick = demoUpdate
-  quickAddBtn.onclick = quickAdd
-  deleteBtn.onclick = () => alert('Корзина не реализована — удаление происходит сразу. Для безопасности подтверждение есть.')
-  
-  // ========== ЗАПУСК ПРИЛОЖЕНИЯ ==========
-  loadSettings()
-  await loadFromSupabase()
-  
-  if (!Object.keys(appData.folders).length) currentFolder = null
-  else if (!currentFolder) currentFolder = Object.keys(appData.folders)[0]
-  renderFolders()
-  renderGallery()
-  if (currentFolder) highlightActiveFolder(currentFolder)
+    
+    function attachPhotoSelection() {
+        document.querySelectorAll('.photo-card').forEach(card => {
+            card.onclick = (e) => {
+                if (e.target.classList.contains('photo-delete')) return;
+                document.querySelectorAll('.photo-card').forEach(c => c.classList.remove('selected'));
+                card.classList.add('selected');
+            };
+        });
+    }
+    
+    async function editSelectedPhoto() {
+        const selectedCard = document.querySelector('.photo-card.selected');
+        if (!selectedCard) { alert('Сначала кликните на фото'); return; }
+        let photoId, currentTag, currentDesc;
+        if (currentMode === 'all') {
+            const folderName = selectedCard.dataset.folder;
+            photoId = parseInt(selectedCard.dataset.id);
+            const photo = appData.folders[folderName]?.photos.find(p => p.id === photoId);
+            if (!photo) return;
+            currentTag = photo.tag;
+            currentDesc = photo.desc;
+        } else {
+            photoId = parseInt(selectedCard.dataset.id);
+            const photo = appData.folders[currentFolder]?.photos.find(p => p.id === photoId);
+            if (!photo) return;
+            currentTag = photo.tag;
+            currentDesc = photo.desc;
+        }
+        const html = `
+            <div style="display:flex; flex-direction:column; gap:12px;">
+                <input type="text" id="editTag" value="${escapeHtml(currentTag)}" placeholder="Тег" style="padding:10px; border-radius:12px;">
+                <textarea id="editDesc" rows="3" placeholder="Описание" style="padding:10px; border-radius:12px;">${escapeHtml(currentDesc)}</textarea>
+            </div>
+        `;
+        const ok = await showModal('Редактировать фото', html, true, true);
+        if (ok) {
+            const newTag = document.getElementById('editTag').value.trim();
+            const newDesc = document.getElementById('editDesc').value.trim();
+            await updatePhotoMetadata(photoId, newTag, newDesc);
+        }
+    }
+    
+    async function renameFolder() {
+        if (!currentFolder) { alert('Выберите папку'); return; }
+        const html = `<input type="text" id="newFolderName" value="${escapeHtml(currentFolder)}" style="width:100%; padding:10px;">`;
+        const ok = await showModal('Переименовать папку', html, true, true);
+        if (ok) {
+            const newName = document.getElementById('newFolderName').value.trim();
+            if (newName && newName !== currentFolder) await renameFolderInSupabase(currentFolder, newName);
+            else if (!newName) alert('Имя не может быть пустым');
+        }
+    }
+    
+    async function showAddPhotoDialog(targetFolder) {
+        const html = `
+            <div style="display:flex; flex-direction:column; gap:14px;">
+                <input type="file" id="photoFilesInput" accept="image/*" multiple style="padding:6px;">
+                <input type="text" id="photoTagInput" placeholder="Тег" style="padding:10px; border-radius:12px;">
+                <textarea id="photoDescInput" placeholder="Описание" rows="3" style="padding:10px; border-radius:12px;"></textarea>
+                <small>Можно выбрать несколько фото. Тег и описание общие.</small>
+            </div>
+        `;
+        const ok = await showModal(`Добавить фото в папку «${escapeHtml(targetFolder)}»`, html, true, true);
+        if (!ok) return;
+        const files = document.getElementById('photoFilesInput').files;
+        if (!files.length) { alert('Выберите хотя бы одно изображение'); return; }
+        const tag = document.getElementById('photoTagInput').value.trim();
+        const desc = document.getElementById('photoDescInput').value.trim();
+        await addPhotoToSupabase(targetFolder, files, tag, desc);
+    }
+    
+    async function quickAdd() {
+        if (currentMode === 'folder' && currentFolder) {
+            await showAddPhotoDialog(currentFolder);
+        } else if (currentMode === 'all') {
+            const foldersList = Object.keys(appData.folders);
+            if (!foldersList.length) { alert('Сначала создайте папку'); return; }
+            const selectHtml = `<select id="folderSelect" style="width:100%; padding:10px;">${foldersList.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('')}</select>`;
+            const ok = await showModal('Выберите папку', selectHtml, true, true);
+            if (ok) {
+                const selected = document.getElementById('folderSelect').value;
+                await showAddPhotoDialog(selected);
+            }
+        } else {
+            alert('Выберите папку');
+        }
+    }
+    
+    function exportData() {
+        let dataToExport;
+        if (currentMode === 'folder' && currentFolder) {
+            dataToExport = { folder: currentFolder, data: appData.folders[currentFolder] };
+        } else if (currentMode === 'all') {
+            const all = [];
+            for (let f in appData.folders) {
+                appData.folders[f].photos.forEach(p => all.push({ folder: f, ...p }));
+            }
+            dataToExport = all;
+        } else { alert('Выберите папку'); return; }
+        const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = currentMode === 'folder' ? `${currentFolder}.json` : 'all_photos.json';
+        a.click();
+        URL.revokeObjectURL(a.href);
+    }
+    
+    async function showSettingsDialog() {
+        const html = `
+            <div style="display:flex; flex-direction:column; gap:20px;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span>🌞 Тёмная тема</span>
+                    <label class="switch"><input type="checkbox" id="themeCheckbox" ${settings.theme === 'dark' ? 'checked' : ''}><span class="slider"></span></label>
+                </div>
+                <div>
+                    <div>Размер миниатюр</div>
+                    <div style="display:flex; gap:12px; margin-top:8px;">
+                        <button class="size-option ${settings.thumbSize === 'small' ? 'active-size' : ''}" data-size="small">Маленькие</button>
+                        <button class="size-option ${settings.thumbSize === 'medium' ? 'active-size' : ''}" data-size="medium">Средние</button>
+                        <button class="size-option ${settings.thumbSize === 'large' ? 'active-size' : ''}" data-size="large">Большие</button>
+                    </div>
+                </div>
+            </div>
+            <style>
+                .switch { position:relative; display:inline-block; width:50px; height:24px; }
+                .switch input { opacity:0; width:0; height:0; }
+                .slider { position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#ccc; border-radius:34px; transition:0.2s; }
+                .slider:before { position:absolute; content:""; height:18px; width:18px; left:3px; bottom:3px; background:white; border-radius:50%; transition:0.2s; }
+                input:checked + .slider { background:var(--accent); }
+                input:checked + .slider:before { transform:translateX(26px); }
+                .size-option { padding:6px 14px; border-radius:40px; border:none; background:var(--accent-soft); cursor:pointer; }
+                .active-size { background:var(--accent); color:white; }
+            </style>
+        `;
+        const ok = await showModal('Настройки', html, true, true);
+        if (ok) {
+            const themeCheck = document.getElementById('themeCheckbox');
+            settings.theme = themeCheck.checked ? 'dark' : 'light';
+            const activeSizeBtn = document.querySelector('.size-option.active-size');
+            if (activeSizeBtn) settings.thumbSize = activeSizeBtn.dataset.size;
+            saveSettings();
+            applyTheme();
+            applyThumbSize();
+            renderGallery();
+        }
+    }
+    
+    function showDatabase() {
+        let rows = '';
+        for (let fn in appData.folders) {
+            const f = appData.folders[fn];
+            rows += `<tr style="background:var(--accent-soft);"><td colspan="4"><strong>📁 ${escapeHtml(fn)}</strong> (${f.photos.length} фото)</td></tr>`;
+            f.photos.forEach((p, i) => {
+                rows += `<tr><td>${i+1}</td><td><img src="${p.url}" style="width:40px; height:40px; object-fit:cover; border-radius:8px;"></td><td>${escapeHtml(p.tag)}</td><td>${escapeHtml(p.desc)}</td></tr>`;
+            });
+        }
+        const html = `<table style="width:100%; border-collapse:collapse;"><thead><tr><th>#</th><th>Миниатюра</th><th>Тег</th><th>Описание</th></tr></thead><tbody>${rows}</tbody></table>`;
+        showModal('База данных', html, false, true);
+    }
+    
+    function showHelp() {
+        const helpHtml = `<div>📖 Функционал: создание папок, добавление фото с тегами/описанием, поиск, сортировка, тёмная тема. Все данные хранятся в Supabase.</div>`;
+        showModal('Справка', helpHtml, false, true);
+    }
+    
+    function demoUpdate() { alert('🔄 Данные синхронизированы с облаком'); }
+    
+    function setMode(mode) {
+        currentMode = mode;
+        if (mode === 'folder') {
+            modeFolderBtn.classList.add('active');
+            modeAllBtn.classList.remove('active');
+            if (!currentFolder) {
+                const first = getFilteredFolders()[0];
+                if (first) currentFolder = first;
+            }
+        } else {
+            modeAllBtn.classList.add('active');
+            modeFolderBtn.classList.remove('active');
+        }
+        renderGallery();
+        renderFolders();
+    }
+    
+    function performSearch() {
+        searchQuery = searchInput.value;
+        renderFolders();
+        renderGallery();
+    }
+    
+    // Назначение обработчиков
+    createBtn.onclick = async () => {
+        const html = `<input type="text" id="folderName" placeholder="Название папки" style="width:100%; padding:10px;">`;
+        const ok = await showModal('Создать папку', html, true, true);
+        if (ok) {
+            const name = document.getElementById('folderName').value.trim();
+            if (name && !appData.folders[name]) await createFolderInSupabase(name);
+            else alert('Некорректное имя или уже существует');
+        }
+    };
+    addPhotoBtn.onclick = () => { if (currentFolder) showAddPhotoDialog(currentFolder); else alert('Выберите папку'); };
+    modeFolderBtn.onclick = () => setMode('folder');
+    modeAllBtn.onclick = () => setMode('all');
+    searchBtn.onclick = performSearch;
+    searchInput.onkeyup = (e) => { if (e.key === 'Enter') performSearch(); };
+    sortSelect.onchange = (e) => { currentSort = e.target.value; renderFolders(); renderGallery(); };
+    settingsBtn.onclick = showSettingsDialog;
+    databaseBtn.onclick = showDatabase;
+    questionBtn.onclick = showHelp;
+    exportBtn.onclick = exportData;
+    editBtn.onclick = renameFolder;
+    updateBtn.onclick = demoUpdate;
+    quickAddBtn.onclick = quickAdd;
+    deleteBtn.onclick = () => alert('Корзина не реализована. Удаление происходит сразу с подтверждением.');
+    
+    // Старт приложения
+    loadSettings();
+    await loadFromSupabase();
+    if (!Object.keys(appData.folders).length) currentFolder = null;
+    else if (!currentFolder) currentFolder = Object.keys(appData.folders)[0];
+    renderFolders();
+    renderGallery();
+    if (currentFolder) highlightActiveFolder(currentFolder);
 </script>
 </body>
 </html>
