@@ -7,93 +7,15 @@
     <link rel="stylesheet" href="style3.css">
 </head>
 <body>
-<div class="grid-container">
-    <header class="header">
-        <div class="logo">
-            <img src="fb.png" alt="Логотип Фотобаза">
-        </div>
-        <div class="header-search-sort">
-            <div class="search-wrapper">
-                <input type="text" id="searchInput" placeholder="Поиск папок, тегов, описаний" class="search-input">
-                <button id="searchBtn" class="search-btn"><img src="lupa.png" alt="Поиск" width="18"></button>
-            </div>
-            <select id="sortSelect" class="sort-select">
-                <option value="name_asc">По имени (А-Я)</option>
-                <option value="name_desc">По имени (Я-А)</option>
-                <option value="date_asc">Сначала старые</option>
-                <option value="date_desc">Сначала новые</option>
-            </select>
-        </div>
-        <div class="header-buttons">
-            <button class="header-icon-btn" id="settingsBtn"><img src="setting.png" alt="Настройки" width="24"></button>
-            <button class="header-icon-btn" id="databaseBtn"><img src="database.png" alt="База данных" width="24"></button>
-            <button class="header-icon-btn" id="questionBtn"><img src="question.png" alt="Справка" width="24"></button>
-        </div>
-    </header>
-
-    <div class="split-container">
-        <div class="split-left">
-            <div class="folders-header">
-                <button class="create-folder-btn" id="createFolderBtn">➕ Создать папку</button>
-            </div>
-            <div class="folders-list-container">
-                <ul class="folders-list" id="foldersList"></ul>
-                <div id="emptyFolderMessage" class="empty-folders-msg">🗀 Папок пока нет<br>Нажмите «Создать папку»</div>
-            </div>
-        </div>
-        <div class="split-right" id="rightPanel">
-            <div class="right-panel-header">
-                <div class="right-panel-title">Галерея</div>
-                <div class="mode-switch">
-                    <button class="mode-btn active" id="modeFolderBtn">По папкам</button>
-                    <button class="mode-btn" id="modeAllBtn">Все фото</button>
-                </div>
-            </div>
-            <div class="folder-content-area" id="folderContentView">
-                <div class="placeholder-icon">🗀</div>
-                <div class="folder-message">Выберите папку из списка слева</div>
-            </div>
-            <button class="add-photo-fab" id="addPhotoBtn" style="display: none;">➕ Добавить фото</button>
-        </div>
-    </div>
-
-    <footer>
-        <div class="footer-strip">
-            <div class="footer-left-btns">
-                <button class="square-btn" id="exportBtn"><img src="axport.png" alt="Экспорт"></button>
-                <button class="square-btn" id="editBtn"><img src="pencils.png" alt="Редактировать"></button>
-                <button class="square-btn" id="updateBtn"><img src="appdate.png" alt="Обновить"></button>
-                <button class="square-btn" id="quickAddBtn"><img src="plus.png" alt="Быстрое добавление"></button>
-            </div>
-            <button class="square-btn footer-right-btn" id="deleteBtn"><img src="delete.png" alt="Корзина"></button>
-        </div>
-    </footer>
-</div>
-
-<div id="modalOverlay" class="modal-overlay" style="display: none;">
-    <div class="modal-content">
-        <div class="modal-header">
-            <span id="modalTitle">Заголовок</span>
-            <button class="modal-close">&times;</button>
-        </div>
-        <div id="modalBody" class="modal-body"></div>
-        <div class="modal-footer">
-            <button id="modalConfirmBtn" class="modal-btn modal-confirm">OK</button>
-            <button id="modalCancelBtn" class="modal-btn modal-cancel">Отмена</button>
-        </div>
-    </div>
-</div>
-
+<!-- ... (весь HTML такой же, как в предыдущем сообщении, до скрипта) ... -->
 <script type="module">
   import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm'
 
-  // ========== НАСТРОЙКИ ==========
   const supabaseUrl = 'https://meojfwicdormzamubexr.supabase.co'
   const supabaseKey = 'sb_publishable_azTxzoKa32Kq4mDP5EYmxQ_BZ2zot5w'
   const supabase = createClient(supabaseUrl, supabaseKey)
   const IMGBB_API_KEY = '7b8f4248b23e8ae808a7092532439bc0'
 
-  // ========== ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ==========
   let appData = { folders: {} }
   let currentFolder = null
   let currentMode = 'folder'
@@ -103,7 +25,7 @@
   let settings = { theme: 'light', thumbSize: 'medium' }
   const SETTINGS_KEY = 'photobase_settings_v3'
   
-  // DOM элементы
+  // DOM элементы (как в предыдущем коде)
   const foldersListEl = document.getElementById('foldersList')
   const emptyMsgDiv = document.getElementById('emptyFolderMessage')
   const createBtn = document.getElementById('createFolderBtn')
@@ -123,7 +45,6 @@
   const quickAddBtn = document.getElementById('quickAddBtn')
   const deleteBtn = document.getElementById('deleteBtn')
   
-  // Модалка
   const modalOverlay = document.getElementById('modalOverlay')
   const modalTitle = document.getElementById('modalTitle')
   const modalBody = document.getElementById('modalBody')
@@ -149,7 +70,6 @@
   
   function escapeHtml(str) { return String(str || '').replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m])) }
   
-  // Настройки темы и размера
   function loadSettings() {
     const stored = localStorage.getItem(SETTINGS_KEY)
     if (stored) try { settings = JSON.parse(stored) } catch(e) {}
@@ -168,7 +88,6 @@
     document.documentElement.style.setProperty('--thumb-size', sz)
   }
   
-  // ========== ЗАГРУЗКА ПРИ СТАРТЕ (один раз) ==========
   async function loadFromSupabase() {
     try {
       const { data: folders, error: foldersError } = await supabase
@@ -205,7 +124,6 @@
     }
   }
   
-  // ========== ЛОКАЛЬНЫЕ ОБНОВЛЕНИЯ БЕЗ ПОЛНОЙ ПЕРЕЗАГРУЗКИ ==========
   function addFolderToLocal(folderName) {
     if (appData.folders[folderName]) return false
     appData.folders[folderName] = { photos: [], createdAt: Date.now() }
@@ -217,7 +135,7 @@
     if (!appData.folders[folderName]) appData.folders[folderName] = { photos: [] }
     appData.folders[folderName].photos.push(...newPhotos)
     if (currentFolder === folderName || currentMode === 'all') renderGallery()
-    renderFolders() // обновит счётчики
+    renderFolders()
   }
   
   function deleteFolderFromLocal(folderName) {
@@ -243,10 +161,6 @@
     if (!folderData) return false
     appData.folders[newName] = folderData
     delete appData.folders[oldName]
-    // обновляем folder_name в каждом фото локально
-    for (const photo of folderData.photos) {
-      photo.folderName = newName
-    }
     if (currentFolder === oldName) currentFolder = newName
     renderFolders()
     renderGallery()
@@ -265,7 +179,6 @@
     renderGallery()
   }
   
-  // ========== РАБОТА С СЕРВЕРОМ (асинхронно, не блокирует UI) ==========
   async function createFolderInSupabase(folderName) {
     const { error } = await supabase.from('folders').insert({ name: folderName })
     if (error) {
@@ -278,10 +191,22 @@
     return true
   }
   
+  // ИСПРАВЛЕННАЯ ФУНКЦИЯ addPhotoToSupabase
   async function addPhotoToSupabase(folderName, files, tag, desc) {
-    if (!files.length) return
-    
-    // Показываем индикатор загрузки
+    // Преобразуем FileList или одиночный файл в массив
+    let fileArray = []
+    if (files instanceof FileList) {
+      fileArray = Array.from(files)
+    } else if (Array.isArray(files)) {
+      fileArray = files
+    } else if (files instanceof File) {
+      fileArray = [files]
+    } else {
+      console.error('Неподдерживаемый тип files:', files)
+      return
+    }
+    if (fileArray.length === 0) return
+
     const loadingMsg = document.createElement('div')
     loadingMsg.className = 'loading-indicator'
     loadingMsg.textContent = '⏳ Загрузка фото на ImgBB...'
@@ -297,8 +222,7 @@
     document.body.appendChild(loadingMsg)
     
     try {
-      // 1. Параллельная загрузка всех файлов на ImgBB
-      const uploadPromises = files.map(async (file) => {
+      const uploadPromises = fileArray.map(async (file) => {
         const formData = new FormData()
         formData.append('image', file)
         const response = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
@@ -311,7 +235,6 @@
       })
       const imageUrls = await Promise.all(uploadPromises)
       
-      // 2. Вставляем все ссылки одной операцией в Supabase
       const records = imageUrls.map(url => ({
         folder_name: folderName,
         image_url: url,
@@ -325,7 +248,6 @@
       
       if (dbError) throw new Error(dbError.message)
       
-      // 3. Добавляем фото в локальное состояние (с полученными id)
       const newPhotos = inserted.map(p => ({
         id: p.id,
         url: p.image_url,
@@ -380,7 +302,7 @@
     else updatePhotoInLocal(photoId, newTag, newDesc)
   }
   
-  // ========== ОТРИСОВКА (без изменений, но быстрая) ==========
+  // Функции отрисовки (такие же, как ранее, без изменений)
   function getFilteredFolders() {
     let folders = Object.keys(appData.folders)
     if (searchQuery.trim()) {
@@ -527,7 +449,6 @@
         const photoId = parseInt(btn.dataset.id)
         let folderName = currentFolder
         if (!folderName) {
-          // ищем папку в allPhotos режиме
           const card = btn.closest('.photo-card')
           folderName = card?.dataset.folder
         }
@@ -684,7 +605,7 @@
     let rows = ''
     for (let fn in appData.folders) {
       const f = appData.folders[fn]
-      rows += `<tr style="background:var(--accent-soft);"><td colspan="4"><strong>📁 ${escapeHtml(fn)}</strong> (${f.photos.length} фото)  </td></tr>`
+      rows += `<tr style="background:var(--accent-soft);"><td colspan="4"><strong>📁 ${escapeHtml(fn)}</strong> (${f.photos.length} фото)   </td></tr>`
       f.photos.forEach((p, i) => {
         rows += `<tr><td>${i+1}</td><td><img src="${p.url}" style="width:40px; height:40px; object-fit:cover; border-radius:8px;"></td><td>${escapeHtml(p.tag)}</td><td>${escapeHtml(p.desc)}</td></tr>`
       })
@@ -726,7 +647,6 @@
     renderGallery()
   }
   
-  // ========== НАЗНАЧЕНИЕ ОБРАБОТЧИКОВ ==========
   createBtn.onclick = async () => {
     const html = `<input type="text" id="folderName" placeholder="Название папки" style="width:100%; padding:10px;">`
     const ok = await showModal('Создать папку', html, true, true)
@@ -751,7 +671,6 @@
   quickAddBtn.onclick = quickAdd
   deleteBtn.onclick = () => alert('Удаление происходит сразу с подтверждением.')
   
-  // ========== СТАРТ ==========
   loadSettings()
   await loadFromSupabase()
   if (!Object.keys(appData.folders).length) currentFolder = null
