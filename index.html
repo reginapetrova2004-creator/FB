@@ -230,40 +230,45 @@
     }
     
     async function addPhotoToSupabase(folderName, files, tag, desc) {
-        // Очищаем имя папки для пути в Storage (только латиница, цифры, дефис, подчёркивание)
-        const safeFolder = folderName.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase();
+    const safeFolder = folderName.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase();
+    
+    for (const file of files) {
+        const ext = file.name.split('.').pop();
+        const fileName = `{Date.now()}_{Math.random().toString(36).substring(2, 8)}.${ext}`;
+        const filePath = `safeFolder/{safeFolder}/safeFolder/{fileName}`;
         
-        for (const file of files) {
-            const ext = file.name.split('.').pop();
-            const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
-            const filePath = `${safeFolder}/${fileName}`;
-            
-            const { error: uploadError } = await supabase.storage
-                .from('photos')
-                .upload(filePath, file);
-            
-            if (uploadError) {
-                alert(`Ошибка загрузки файла ${file.name}: ${uploadError.message}`);
-                continue;
-            }
-            
-            const { data: publicUrlData } = supabase.storage
-                .from('photos')
-                .getPublicUrl(filePath);
-            
-            const { error: dbError } = await supabase
-                .from('photos')
-                .insert({
-                    folder_name: folderName,
-                    image_url: publicUrlData.publicUrl,
-                    tag: tag,
-                    description: desc
-                });
-            
-            if (dbError) alert(`Ошибка сохранения данных: ${dbError.message}`);
+        // Завершите загрузку
+        const { error: uploadError } = await supabase.storage
+            .from('photos')
+            .upload(filePath, file);
+        
+        if (uploadError) {
+            alert(`Ошибка загрузки файла file.name:{file.name}:file.name:{uploadError.message}`);
+            return;
         }
-        await loadFromSupabase();
+
+        // Получите публичный URL
+        const { data: publicUrlData } = supabase.storage
+            .from('photos')
+            .getPublicUrl(filePath);
+        
+        // Сохраните ссылку в базу данных
+        const { error: dbError } = await supabase
+            .from('photos')
+            .insert({
+                folder_name: folderName,
+                image_url: publicUrlData.publicUrl,
+                tag: tag,
+                description: desc
+            });
+        
+        if (dbError) alert(`Ошибка сохранения данных: ${dbError.message}`);
     }
+    
+    // Загрузить обновленные данные
+    await loadFromSupabase();
+}
+
     
     async function deleteFolderPermanently(folderName) {
         const { data: photos, error: getError } = await supabase
