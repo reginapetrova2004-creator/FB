@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>ФОТОБАЗА — облачная версия (Supabase Storage)</title>
+    <title>ФОТОБАЗА — облачная версия (сжатие + Supabase Storage)</title>
     <link rel="stylesheet" href="style3.css">
 </head>
 <body>
@@ -53,7 +53,6 @@
                 <div class="placeholder-icon">🗀</div>
                 <div class="folder-message">Выберите папку из списка слева</div>
             </div>
-            <!-- Плавающая кнопка УДАЛЕНА -->
         </div>
     </div>
 
@@ -110,7 +109,7 @@
   let settings = { theme: 'light', thumbSize: 'medium' }
   const SETTINGS_KEY = 'photobase_settings_v3'
 
-  // DOM элементы
+  // DOM элементы (те же, что и раньше)
   const foldersListEl = document.getElementById('foldersList')
   const emptyMsgDiv = document.getElementById('emptyFolderMessage')
   const createBtn = document.getElementById('createFolderBtn')
@@ -164,7 +163,7 @@
 
   function escapeHtml(str) { return String(str || '').replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m])) }
 
-  // Настройки
+  // Настройки (тема, размер миниатюр)
   function loadSettings() {
     const stored = localStorage.getItem(SETTINGS_KEY)
     if (stored) try { settings = JSON.parse(stored) } catch(e) {}
@@ -181,6 +180,41 @@
     if (settings.thumbSize === 'small') sz = '100px'
     if (settings.thumbSize === 'large') sz = '200px'
     document.documentElement.style.setProperty('--thumb-size', sz)
+  }
+
+  // ========== СЖАТИЕ ИЗОБРАЖЕНИЙ ==========
+  function compressImage(file, maxWidth = 1400, quality = 0.8) {
+    return new Promise((resolve, reject) => {
+      // Если файл не изображение или уже маленький – можно пропустить, но лучше сжать всегда
+      const reader = new FileReader()
+      reader.readAsDataURL(file)
+      reader.onload = (e) => {
+        const img = new Image()
+        img.src = e.target.result
+        img.onload = () => {
+          let width = img.width
+          let height = img.height
+          if (width > maxWidth) {
+            height = (height * maxWidth) / width
+            width = maxWidth
+          }
+          const canvas = document.createElement('canvas')
+          canvas.width = width
+          canvas.height = height
+          const ctx = canvas.getContext('2d')
+          ctx.drawImage(img, 0, 0, width, height)
+          canvas.toBlob(blob => {
+            if (!blob) reject(new Error('Ошибка сжатия'))
+            // Сохраняем оригинальное имя и тип
+            blob.name = file.name
+            blob.lastModified = Date.now()
+            resolve(blob)
+          }, file.type, quality)
+        }
+        img.onerror = reject
+      }
+      reader.onerror = reject
+    })
   }
 
   // Локальные операции (мгновенное обновление UI)
@@ -276,7 +310,7 @@
     }
   }
 
-  // === ОПЕРАЦИИ С SUPABASE STORAGE (без проверки бакета) ===
+  // === ОПЕРАЦИИ С SUPABASE STORAGE (СО СЖАТИЕМ) ===
   async function createFolderInSupabase(folderName) {
     if (!folderName.trim()) { alert('Имя не может быть пустым'); return false }
     const { error } = await supabase.from('folders').insert({ name: folderName })
@@ -287,61 +321,72 @@
     return true
   }
 
- async function addPhotoToSupabase(folderName, files, tag, desc) {
-  let fileArray = Array.from(files)
-  if (fileArray.length === 0) return
+  async function addPhotoToSupabase(folderName, files, tag, desc) {
+    let fileArray = Array.from(files)
+    if (fileArray.length === 0) return
 
-  const loadingDiv = document.createElement('div')
-  loadingDiv.className = 'loading-indicator'
-  loadingDiv.innerHTML = '<span class="loading-spinner"></span> Загрузка в Supabase Storage...'
-  loadingDiv.style.cssText = 'position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:var(--surface); padding:8px 20px; border-radius:40px; z-index:1100; backdrop-filter:blur(8px); border:1px solid var(--border);'
-  document.body.appendChild(loadingDiv)
+    const loadingDiv = document.createElement('div')
+    loadingDiv.className = 'loading-indicator'
+    loadingDiv.innerHTML = '<span class="loading-spinner"></span> Сжатие и загрузка...'
+    loadingDiv.style.cssText = 'position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:var(--surface); padding:8px 20px; border-radius:40px; z-index:1100; backdrop-filter:blur(8px); border:1px solid var(--border);'
+    document.body.appendChild(loadingDiv)
 
-  try {
-    const newPhotos = []
-    for (const file of fileArray) {
-      const ext = file.name.split('.').pop()
-      const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`
-      const filePath = `${folderName}/${fileName}`
+    try {
+      const newPhotos = []
+      let processed = 0
+      for (const file of fileArray) {
+        // Обновляем текст прогресса
+        loadingDiv.innerHTML = `<span class="loading-spinner"></span> Сжатие ${processed+1}/${fileArray.length}...`
+        
+        // Сжимаем изображение
+        const compressedBlob = await compressImage(file, 1400, 0.8)
+        
+        loadingDiv.innerHTML = `<span class="loading-spinner"></span> Загрузка ${processed+1}/${fileArray.length}...`
+        
+        const ext = file.name.split('.').pop()
+        const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`
+        const filePath = `${folderName}/${fileName}`
 
-      const { error: uploadError } = await supabase.storage
-        .from('photos')
-        .upload(filePath, file, { contentType: file.type })
-      if (uploadError) throw new Error(`Ошибка Storage: ${uploadError.message}`)
+        // Загружаем сжатый blob
+        const { error: uploadError } = await supabase.storage
+          .from('photos')
+          .upload(filePath, compressedBlob, { contentType: file.type })
+        if (uploadError) throw new Error(`Ошибка Storage: ${uploadError.message}`)
 
-      const { data: publicUrlData } = supabase.storage
-        .from('photos')
-        .getPublicUrl(filePath)
-      const imageUrl = publicUrlData.publicUrl
+        const { data: publicUrlData } = supabase.storage
+          .from('photos')
+          .getPublicUrl(filePath)
+        const imageUrl = publicUrlData.publicUrl
 
-      const { data: inserted, error: dbError } = await supabase
-        .from('photos')
-        .insert({
-          folder_name: folderName,
-          image_url: imageUrl,
-          tag: tag,
-          description: desc
+        const { data: inserted, error: dbError } = await supabase
+          .from('photos')
+          .insert({
+            folder_name: folderName,
+            image_url: imageUrl,
+            tag: tag,
+            description: desc
+          })
+          .select()
+        if (dbError) throw new Error(`Ошибка БД: ${dbError.message}`)
+
+        newPhotos.push({
+          id: inserted[0].id,
+          url: inserted[0].image_url,
+          tag: inserted[0].tag || '',
+          desc: inserted[0].description || '',
+          createdAt: inserted[0].created_at
         })
-        .select()
-      if (dbError) throw new Error(`Ошибка БД: ${dbError.message}`)
-
-      newPhotos.push({
-        id: inserted[0].id,
-        url: inserted[0].image_url,
-        tag: inserted[0].tag || '',
-        desc: inserted[0].description || '',
-        createdAt: inserted[0].created_at
-      })
+        processed++
+      }
+      addPhotosToLocal(folderName, newPhotos)
+      alert(`✅ Загружено ${newPhotos.length} фото (все сжаты)`)
+    } catch (err) {
+      console.error('Ошибка загрузки:', err)
+      alert(`❌ Ошибка: ${err.message}\n\nПроверьте бакет и права.`)
+    } finally {
+      loadingDiv.remove()
     }
-    addPhotosToLocal(folderName, newPhotos)
-    alert(`✅ Загружено ${newPhotos.length} фото`)
-  } catch (err) {
-    console.error('Ошибка загрузки:', err)
-    alert(`❌ Ошибка: ${err.message}\n\nПроверьте:\n- Бакет "photos" существует и публичный\n- RLS для Storage отключён\n- Таблицы folders/photos существуют`)
-  } finally {
-    loadingDiv.remove()
   }
-}
 
   async function deleteFolderPermanently(folderName) {
     const folderPhotos = appData.folders[folderName]?.photos || []
@@ -392,7 +437,7 @@
     else updatePhotoInLocal(photoId, newTag, newDesc)
   }
 
-  // Фильтрация и сортировка фото
+  // Фильтрация и сортировка фото (без изменений)
   function getFilteredPhotosForFolder(folderPhotos) {
     let filtered = folderPhotos
     if (searchQuery.trim()) {
@@ -600,7 +645,7 @@
     attachDoubleClick()
   }
 
-  // Диалоги
+  // Диалоги (без изменений)
   async function editSelectedPhoto() {
     const selectedCard = document.querySelector('.photo-card.selected')
     if (!selectedCard) { alert('Сначала кликните на фото'); return }
@@ -709,12 +754,12 @@
         </tr>
       `
     }
-    const tableHtml = `<div style="overflow-x: auto;"><table style="width:100%; border-collapse: collapse; font-size: 0.8rem;"><thead><tr style="background: var(--accent-soft);"><th>Папка</th><th>Миниатюра</th><th>Тег</th><th>Описание</th><th>ID</th><th>URL</th><tr></thead><tbody>${rows}</tbody></table></div>`
+    const tableHtml = `<div style="overflow-x: auto;"><table style="width:100%; border-collapse: collapse; font-size: 0.8rem;"><thead><tr style="background: var(--accent-soft);"><th>Папка</th><th>Миниатюра</th><th>Тег</th><th>Описание</th><th>ID</th><th>URL</th></tr></thead><tbody>${rows}</tbody></table></div>`
     showModal('База данных (данные из Supabase)', tableHtml, false, true)
   }
 
   function showHelp() {
-    const helpHtml = `<div>📖 Функционал: создание папок, добавление фото с тегами/описанием, поиск, сортировка, тёмная тема. Фото хранятся в Supabase Storage, метаданные — в Supabase.</div>`
+    const helpHtml = `<div>📖 Функционал: создание папок, добавление фото с тегами/описанием, поиск, сортировка, тёмная тема. Фото сжимаются перед отправкой (до 1400px, качество 80%), что ускоряет загрузку.</div>`
     showModal('Справка', helpHtml, false, true)
   }
 
@@ -755,7 +800,7 @@
     renderGallery()
   }
 
-  // Назначение обработчиков
+  // Обработчики событий (как и раньше)
   createBtn.onclick = async () => {
     const html = `<input type="text" id="folderName" placeholder="Название папки">`
     const ok = await showModal('Создать папку', html, true, true)
