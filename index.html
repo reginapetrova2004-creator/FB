@@ -3,19 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
-    <title>ФОТОБАЗА — быстрая облачная версия</title>
-    <link rel="stylesheet" href="style3.css">
+    <title>ФОТОБАЗА — быстрая облачная версия (ImgBB + Supabase)</title>
+   <link rel="stylesheet" href="style3.css">
 </head>
 <body>
 <div class="grid-container">
     <header class="header">
-        <div class="logo">
-            <img src="fb.png" alt="Логотип Фотобаза">
-        </div>
+        <div class="logo"><img src="fb.png" alt="Логотип"></div>
         <div class="header-search-sort">
             <div class="search-wrapper">
                 <input type="text" id="searchInput" placeholder="Поиск папок, тегов, описаний" class="search-input">
-                <button id="searchBtn" class="search-btn"><img src="lupa.png" alt="Поиск" width="18"></button>
+                <button id="searchBtn" class="search-btn"><img src="lupa.png" alt="🔍" width="18"></button>
             </div>
             <select id="sortSelect" class="sort-select">
                 <option value="name_asc">По имени (А-Я)</option>
@@ -26,7 +24,7 @@
         </div>
         <div class="header-buttons">
             <button class="header-icon-btn" id="settingsBtn"><img src="setting.png" alt="Настройки" width="24"></button>
-            <button class="header-icon-btn" id="databaseBtn"><img src="database.png" alt="База данных" width="24"></button>
+            <button class="header-icon-btn" id="databaseBtn"><img src="database.png" alt="База" width="24"></button>
             <button class="header-icon-btn" id="questionBtn"><img src="question.png" alt="Справка" width="24"></button>
         </div>
     </header>
@@ -53,7 +51,7 @@
                 <div class="placeholder-icon">🗀</div>
                 <div class="folder-message">Выберите папку из списка слева</div>
             </div>
-            <!-- Плавающая кнопка УДАЛЕНА -->
+            <button class="add-photo-fab" id="addPhotoBtn" style="display: none;">➕ Добавить фото</button>
         </div>
     </div>
 
@@ -61,7 +59,7 @@
         <div class="footer-strip">
             <div class="footer-left-btns">
                 <button class="square-btn" id="exportBtn"><img src="axport.png" alt="Экспорт"></button>
-                <button class="square-btn" id="editBtn"><img src="pencils.png" alt="Редактировать"></button>
+                <button class="square-btn" id="editBtn"><img src="pencils.png" alt="Переименовать папку"></button>
                 <button class="square-btn" id="updateBtn"><img src="appdate.png" alt="Обновить"></button>
                 <button class="square-btn" id="quickAddBtn"><img src="plus.png" alt="Быстрое добавление"></button>
             </div>
@@ -85,14 +83,6 @@
     </div>
 </div>
 
-<!-- Модальное окно для просмотра изображения (отдельное) -->
-<div id="imageModal" class="modal-overlay" style="display: none;">
-    <div class="modal-content image-modal-content" style="background: transparent; box-shadow: none; max-width: 90vw;">
-        <img id="fullImage" src="" alt="Просмотр">
-        <button class="modal-close" style="position: absolute; top: 20px; right: 20px; background: rgba(0,0,0,0.5); color: white; border-radius: 50%; width: 36px; height: 36px;">&times;</button>
-    </div>
-</div>
-
 <script type="module">
   import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm'
 
@@ -107,8 +97,7 @@
   let currentFolder = null
   let currentMode = 'folder'
   let searchQuery = ''
-  let currentSort = 'name_asc'        // для папок
-  let photoSort = 'date_desc'          // для фото внутри галереи (date_desc / date_asc)
+  let currentSort = 'name_asc'
   let settings = { theme: 'light', thumbSize: 'medium' }
   const SETTINGS_KEY = 'photobase_settings_v3'
 
@@ -117,6 +106,7 @@
   const emptyMsgDiv = document.getElementById('emptyFolderMessage')
   const createBtn = document.getElementById('createFolderBtn')
   const folderContentView = document.getElementById('folderContentView')
+  const addPhotoBtn = document.getElementById('addPhotoBtn')
   const modeFolderBtn = document.getElementById('modeFolderBtn')
   const modeAllBtn = document.getElementById('modeAllBtn')
   const searchInput = document.getElementById('searchInput')
@@ -131,7 +121,7 @@
   const quickAddBtn = document.getElementById('quickAddBtn')
   const deleteBtn = document.getElementById('deleteBtn')
   
-  // Модалки
+  // Модалка
   const modalOverlay = document.getElementById('modalOverlay')
   const modalTitle = document.getElementById('modalTitle')
   const modalBody = document.getElementById('modalBody')
@@ -139,9 +129,6 @@
   const modalCancel = document.getElementById('modalCancelBtn')
   let modalResolve = null
 
-  const imageModal = document.getElementById('imageModal')
-  const fullImage = document.getElementById('fullImage')
-  
   function showModal(title, html, showConfirm = true, showCancel = true) {
     return new Promise(resolve => {
       modalTitle.innerText = title
@@ -155,19 +142,12 @@
   function closeModal(result) { modalOverlay.style.display = 'none'; if (modalResolve) modalResolve(result); modalResolve = null }
   modalConfirm.onclick = () => closeModal(true)
   modalCancel.onclick = () => closeModal(false)
-  document.querySelectorAll('.modal-close').forEach(btn => {
-    btn.onclick = () => closeModal(false)
-  })
+  document.querySelector('.modal-close').onclick = () => closeModal(false)
   modalOverlay.onclick = (e) => { if (e.target === modalOverlay) closeModal(false) }
-  
-  // Для imageModal своё закрытие
-  function closeImageModal() { imageModal.style.display = 'none'; }
-  imageModal.onclick = (e) => { if (e.target === imageModal) closeImageModal(); }
-  document.querySelector('#imageModal .modal-close').onclick = closeImageModal;
 
   function escapeHtml(str) { return String(str || '').replace(/[&<>]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m])) }
 
-  // Настройки
+  // ========== НАСТРОЙКИ ИНТЕРФЕЙСА ==========
   function loadSettings() {
     const stored = localStorage.getItem(SETTINGS_KEY)
     if (stored) try { settings = JSON.parse(stored) } catch(e) {}
@@ -186,7 +166,7 @@
     document.documentElement.style.setProperty('--thumb-size', sz)
   }
 
-  // ========== ЛОКАЛЬНЫЕ ОПЕРАЦИИ ==========
+  // ========== ЛОКАЛЬНЫЕ ОПЕРАЦИИ (мгновенное обновление UI) ==========
   function addFolderToLocal(folderName) {
     if (appData.folders[folderName]) return false
     appData.folders[folderName] = { photos: [], createdAt: Date.now() }
@@ -297,7 +277,6 @@
     const loadingDiv = document.createElement('div')
     loadingDiv.className = 'loading-indicator'
     loadingDiv.innerHTML = '<span class="loading-spinner"></span> Загрузка фото на ImgBB...'
-    loadingDiv.style.cssText = 'position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:var(--surface); padding:8px 20px; border-radius:40px; z-index:1100; backdrop-filter:blur(8px); border:1px solid var(--border);'
     document.body.appendChild(loadingDiv)
 
     try {
@@ -378,42 +357,6 @@
       .eq('id', photoId)
     if (error) alert('Ошибка обновления: ' + error.message)
     else updatePhotoInLocal(photoId, newTag, newDesc)
-  }
-
-  // ========== ФИЛЬТРАЦИЯ И СОРТИРОВКА ФОТО ==========
-  function getFilteredPhotosForFolder(folderPhotos) {
-    let filtered = folderPhotos
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase()
-      filtered = filtered.filter(p => p.tag.toLowerCase().includes(q) || p.desc.toLowerCase().includes(q))
-    }
-    // Сортировка фото по дате (используем photoSort)
-    const sortOrder = photoSort === 'date_desc' ? -1 : 1
-    filtered.sort((a, b) => {
-      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0
-      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0
-      return (dateB - dateA) * sortOrder
-    })
-    return filtered
-  }
-
-  // Функция для получения всех фото с учетом поиска и сортировки
-  function getAllFilteredPhotos() {
-    let all = []
-    for (let f in appData.folders) {
-      all.push(...appData.folders[f].photos.map(p => ({ ...p, folderName: f })))
-    }
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase()
-      all = all.filter(p => p.tag.toLowerCase().includes(q) || p.desc.toLowerCase().includes(q))
-    }
-    const sortOrder = photoSort === 'date_desc' ? -1 : 1
-    all.sort((a, b) => {
-      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0
-      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0
-      return (dateB - dateA) * sortOrder
-    })
-    return all
   }
 
   // ========== ОТРИСОВКА ИНТЕРФЕЙСА ==========
@@ -502,15 +445,19 @@
 
   function renderGallery() {
     if (currentMode === 'all') {
-      const allPhotos = getAllFilteredPhotos()
+      addPhotoBtn.style.display = 'block'
+      let allPhotos = []
+      for (let f in appData.folders) {
+        appData.folders[f].photos.forEach(p => allPhotos.push({ ...p, folderName: f }))
+      }
       if (!allPhotos.length) {
-        folderContentView.innerHTML = `<div class="folder-message">Нет фотографий, соответствующих запросу</div>`
+        folderContentView.innerHTML = `<div class="folder-message">Нет фотографий</div>`
         return
       }
       let html = `<div class="photos-grid">`
       allPhotos.forEach(ph => {
         html += `
-          <div class="photo-card" data-folder="${escapeHtml(ph.folderName)}" data-id="${ph.id}" data-url="${escapeHtml(ph.url)}">
+          <div class="photo-card" data-folder="${escapeHtml(ph.folderName)}" data-id="${ph.id}">
             <img src="${ph.url}" class="photo-thumb" loading="lazy">
             <div class="photo-meta"><span class="photo-tag">🏷️ ${escapeHtml(ph.tag || 'без тега')}</span><span class="photo-desc">${escapeHtml(ph.desc || '')}</span></div>
             <button class="photo-delete" data-id="${ph.id}">✖</button>
@@ -521,24 +468,24 @@
       folderContentView.innerHTML = html
       attachPhotoEvents()
       attachPhotoSelection()
-      attachDoubleClick()
       return
     }
     
     if (!currentFolder || !appData.folders[currentFolder]) {
       folderContentView.innerHTML = `<div class="placeholder-icon">🗀</div><div class="folder-message">Выберите папку</div>`
+      addPhotoBtn.style.display = 'none'
       return
     }
-    const folderPhotos = appData.folders[currentFolder].photos
-    const filteredPhotos = getFilteredPhotosForFolder(folderPhotos)
-    if (!filteredPhotos.length) {
-      folderContentView.innerHTML = `<div class="folder-message"><strong>${escapeHtml(currentFolder)}</strong><br>Нет фотографий, соответствующих поиску</div>`
+    addPhotoBtn.style.display = 'block'
+    const folder = appData.folders[currentFolder]
+    if (!folder.photos.length) {
+      folderContentView.innerHTML = `<div class="folder-message"><strong>${escapeHtml(currentFolder)}</strong><br>Нет фотографий. Нажмите «Добавить фото»</div>`
       return
     }
     let html = `<div class="photos-grid">`
-    filteredPhotos.forEach(ph => {
+    folder.photos.forEach(ph => {
       html += `
-        <div class="photo-card" data-id="${ph.id}" data-url="${escapeHtml(ph.url)}">
+        <div class="photo-card" data-id="${ph.id}">
           <img src="${ph.url}" class="photo-thumb" loading="lazy">
           <div class="photo-meta"><span class="photo-tag">🏷️ ${escapeHtml(ph.tag || 'без тега')}</span><span class="photo-desc">${escapeHtml(ph.desc || '')}</span></div>
           <button class="photo-delete" data-id="${ph.id}">✖</button>
@@ -549,7 +496,6 @@
     folderContentView.innerHTML = html
     attachPhotoEvents()
     attachPhotoSelection()
-    attachDoubleClick()
   }
 
   function attachPhotoEvents() {
@@ -576,19 +522,6 @@
         if (e.target.classList.contains('photo-delete')) return
         document.querySelectorAll('.photo-card').forEach(c => c.classList.remove('selected'))
         card.classList.add('selected')
-      }
-    })
-  }
-
-  function attachDoubleClick() {
-    document.querySelectorAll('.photo-card').forEach(card => {
-      card.ondblclick = (e) => {
-        e.stopPropagation()
-        const imgUrl = card.dataset.url
-        if (imgUrl) {
-          fullImage.src = imgUrl
-          imageModal.style.display = 'flex'
-        }
       }
     })
   }
@@ -685,106 +618,7 @@
     URL.revokeObjectURL(a.href)
   }
 
-  // Кнопка "База данных" — отображение таблицы со всеми данными из Supabase
-  async function showDatabase() {
-    // Получаем свежие данные напрямую из Supabase для таблицы
-    const { data: photos, error } = await supabase.from('photos').select('*').order('created_at', { ascending: false })
-    if (error) { alert('Ошибка загрузки данных: ' + error.message); return }
-    
-    if (!photos.length) {
-      showModal('База данных', '<div>Нет данных</div>', false, true)
-      return
-    }
-    
-    let rows = ''
-    for (const p of photos) {
-      rows += `
-        <tr style="border-bottom: 1px solid var(--border);">
-          <td style="padding: 8px;">${escapeHtml(p.folder_name)}</td>
-          <td style="padding: 8px;"><a href="${p.image_url}" target="_blank"><img src="${p.image_url}" style="width: 50px; height: 50px; object-fit: cover; border-radius: 8px;"></a></td>
-          <td style="padding: 8px;">${escapeHtml(p.tag || '')}</td>
-          <td style="padding: 8px;">${escapeHtml(p.description || '')}</td>
-          <td style="padding: 8px;">${p.id}</td>
-          <td style="padding: 8px;"><a href="${p.image_url}" target="_blank" style="color: var(--accent);">ссылка</a></td>
-        </tr>
-      `
-    }
-    const tableHtml = `
-      <div style="overflow-x: auto;">
-        <table style="width:100%; border-collapse: collapse; font-size: 0.8rem;">
-          <thead><tr style="background: var(--accent-soft);">
-            <th>Папка</th><th>Миниатюра</th><th>Тег</th><th>Описание</th><th>ID</th><th>URL</th>
-          </tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-    `
-    showModal('База данных (данные из Supabase)', tableHtml, false, true)
-  }
-
-  function showHelp() {
-    const helpHtml = `<div>📖 Функционал: создание папок, добавление фото с тегами/описанием, поиск, сортировка, тёмная тема. Фото хранятся на ImgBB, метаданные в Supabase.</div>`
-    showModal('Справка', helpHtml, false, true)
-  }
-
-  function demoUpdate() { 
-    alert('🔄 Принудительная синхронизация с облаком...')
-    loadFromSupabase()
-  }
-
-  function setMode(mode) {
-    currentMode = mode
-    if (mode === 'folder') {
-      modeFolderBtn.classList.add('active')
-      modeAllBtn.classList.remove('active')
-      if (!currentFolder) {
-        const first = getFilteredFolders()[0]
-        if (first) currentFolder = first
-      }
-    } else {
-      modeAllBtn.classList.add('active')
-      modeFolderBtn.classList.remove('active')
-    }
-    renderGallery()
-    renderFolders()
-  }
-
-  function performSearch() {
-    searchQuery = searchInput.value
-    renderFolders()
-    renderGallery()
-  }
-
-  // Обработчик изменения сортировки (для фото)
-  function handleSortChange() {
-    const sortValue = sortSelect.value
-    if (sortValue === 'date_asc') photoSort = 'date_asc'
-    else if (sortValue === 'date_desc') photoSort = 'date_desc'
-    else {
-      // если выбрано имя папки, то для фото оставляем сортировку по дате по умолчанию
-      photoSort = 'date_desc'
-    }
-    currentSort = sortValue   // для папок
-    renderFolders()
-    renderGallery()
-  }
-
-  // ========== НАЗНАЧЕНИЕ ОБРАБОТЧИКОВ ==========
-  createBtn.onclick = async () => {
-    const html = `<input type="text" id="folderName" placeholder="Название папки">`
-    const ok = await showModal('Создать папку', html, true, true)
-    if (ok) {
-      const name = document.getElementById('folderName').value.trim()
-      if (name && !appData.folders[name]) await createFolderInSupabase(name)
-      else alert('Некорректное имя или уже существует')
-    }
-  }
-  modeFolderBtn.onclick = () => setMode('folder')
-  modeAllBtn.onclick = () => setMode('all')
-  searchBtn.onclick = performSearch
-  searchInput.onkeyup = (e) => { if (e.key === 'Enter') performSearch() }
-  sortSelect.onchange = handleSortChange
-  settingsBtn.onclick = async () => {
+  async function showSettingsDialog() {
     const html = `
       <div style="display:flex; flex-direction:column; gap:20px;">
         <div style="display:flex; justify-content:space-between;">
@@ -822,6 +656,70 @@
       renderGallery()
     }
   }
+
+  function showDatabase() {
+    let rows = ''
+    for (let fn in appData.folders) {
+      const f = appData.folders[fn]
+      rows += `<tr style="background:var(--accent-soft);"><td colspan="4"><strong>📁 ${escapeHtml(fn)}</strong> (${f.photos.length} фото)</td></tr>`
+      f.photos.forEach((p, i) => {
+        rows += `<tr><td>${i+1}</td><td><img src="${p.url}" style="width:40px; height:40px; object-fit:cover; border-radius:8px;"></td><td>${escapeHtml(p.tag)}</td><td>${escapeHtml(p.desc)}</td></tr>`
+      })
+    }
+    const html = `<table style="width:100%; border-collapse:collapse;"><thead><tr><th>#</th><th>Миниатюра</th><th>Тег</th><th>Описание</th></tr></thead><tbody>${rows}</tbody></table>`
+    showModal('База данных', html, false, true)
+  }
+
+  function showHelp() {
+    const helpHtml = `<div>📖 Функционал: создание папок, добавление фото с тегами/описанием, поиск, сортировка, тёмная тема. Фото хранятся на ImgBB, метаданные в Supabase. Работает быстро благодаря локальному обновлению.</div>`
+    showModal('Справка', helpHtml, false, true)
+  }
+
+  function demoUpdate() { 
+    alert('🔄 Принудительная синхронизация с облаком...')
+    loadFromSupabase()
+  }
+
+  function setMode(mode) {
+    currentMode = mode
+    if (mode === 'folder') {
+      modeFolderBtn.classList.add('active')
+      modeAllBtn.classList.remove('active')
+      if (!currentFolder) {
+        const first = getFilteredFolders()[0]
+        if (first) currentFolder = first
+      }
+    } else {
+      modeAllBtn.classList.add('active')
+      modeFolderBtn.classList.remove('active')
+    }
+    renderGallery()
+    renderFolders()
+  }
+
+  function performSearch() {
+    searchQuery = searchInput.value
+    renderFolders()
+    renderGallery()
+  }
+
+  // ========== НАЗНАЧЕНИЕ ОБРАБОТЧИКОВ ==========
+  createBtn.onclick = async () => {
+    const html = `<input type="text" id="folderName" placeholder="Название папки">`
+    const ok = await showModal('Создать папку', html, true, true)
+    if (ok) {
+      const name = document.getElementById('folderName').value.trim()
+      if (name && !appData.folders[name]) await createFolderInSupabase(name)
+      else alert('Некорректное имя или уже существует')
+    }
+  }
+  addPhotoBtn.onclick = () => { if (currentFolder) showAddPhotoDialog(currentFolder); else alert('Выберите папку') }
+  modeFolderBtn.onclick = () => setMode('folder')
+  modeAllBtn.onclick = () => setMode('all')
+  searchBtn.onclick = performSearch
+  searchInput.onkeyup = (e) => { if (e.key === 'Enter') performSearch() }
+  sortSelect.onchange = (e) => { currentSort = e.target.value; renderFolders(); renderGallery() }
+  settingsBtn.onclick = showSettingsDialog
   databaseBtn.onclick = showDatabase
   questionBtn.onclick = showHelp
   exportBtn.onclick = exportData
