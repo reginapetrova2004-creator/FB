@@ -287,66 +287,61 @@
     return true
   }
 
-  // ИСПРАВЛЕННАЯ ФУНКЦИЯ – без проверки listBuckets
-  async function addPhotoToSupabase(folderName, files, tag, desc) {
-    let fileArray = Array.from(files)
-    if (fileArray.length === 0) return
+ async function addPhotoToSupabase(folderName, files, tag, desc) {
+  let fileArray = Array.from(files)
+  if (fileArray.length === 0) return
 
-    const loadingDiv = document.createElement('div')
-    loadingDiv.className = 'loading-indicator'
-    loadingDiv.innerHTML = '<span class="loading-spinner"></span> Загрузка в Supabase Storage...'
-    loadingDiv.style.cssText = 'position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:var(--surface); padding:8px 20px; border-radius:40px; z-index:1100; backdrop-filter:blur(8px); border:1px solid var(--border);'
-    document.body.appendChild(loadingDiv)
+  const loadingDiv = document.createElement('div')
+  loadingDiv.className = 'loading-indicator'
+  loadingDiv.innerHTML = '<span class="loading-spinner"></span> Загрузка в Supabase Storage...'
+  loadingDiv.style.cssText = 'position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:var(--surface); padding:8px 20px; border-radius:40px; z-index:1100; backdrop-filter:blur(8px); border:1px solid var(--border);'
+  document.body.appendChild(loadingDiv)
 
-    try {
-      const newPhotos = []
-      for (const file of fileArray) {
-        const ext = file.name.split('.').pop()
-        const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`
-        const filePath = `${folderName}/${fileName}`
+  try {
+    const newPhotos = []
+    for (const file of fileArray) {
+      const ext = file.name.split('.').pop()
+      const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`
+      const filePath = `${folderName}/${fileName}`
 
-        // Прямая загрузка в бакет "photos"
-        const { error: uploadError } = await supabase.storage
-          .from('photos')
-          .upload(filePath, file, {
-            cacheControl: '3600',
-            contentType: file.type
-          })
-        if (uploadError) throw new Error(`Ошибка Storage: ${uploadError.message}`)
+      const { error: uploadError } = await supabase.storage
+        .from('photos')
+        .upload(filePath, file, { contentType: file.type })
+      if (uploadError) throw new Error(`Ошибка Storage: ${uploadError.message}`)
 
-        const { data: publicUrlData } = supabase.storage
-          .from('photos')
-          .getPublicUrl(filePath)
-        const imageUrl = publicUrlData.publicUrl
+      const { data: publicUrlData } = supabase.storage
+        .from('photos')
+        .getPublicUrl(filePath)
+      const imageUrl = publicUrlData.publicUrl
 
-        const { data: inserted, error: dbError } = await supabase
-          .from('photos')
-          .insert({
-            folder_name: folderName,
-            image_url: imageUrl,
-            tag: tag,
-            description: desc
-          })
-          .select()
-        if (dbError) throw new Error(`Ошибка БД: ${dbError.message}`)
-
-        newPhotos.push({
-          id: inserted[0].id,
-          url: inserted[0].image_url,
-          tag: inserted[0].tag || '',
-          desc: inserted[0].description || '',
-          createdAt: inserted[0].created_at
+      const { data: inserted, error: dbError } = await supabase
+        .from('photos')
+        .insert({
+          folder_name: folderName,
+          image_url: imageUrl,
+          tag: tag,
+          description: desc
         })
-      }
-      addPhotosToLocal(folderName, newPhotos)
-      alert(`✅ Загружено ${newPhotos.length} фото`)
-    } catch (err) {
-      console.error('Ошибка загрузки:', err)
-      alert(`❌ Ошибка: ${err.message}\n\nПроверьте:\n- Бакет "photos" существует и публичный\n- RLS для Storage отключён или настроен\n- Таблицы folders/photos существуют`)
-    } finally {
-      loadingDiv.remove()
+        .select()
+      if (dbError) throw new Error(`Ошибка БД: ${dbError.message}`)
+
+      newPhotos.push({
+        id: inserted[0].id,
+        url: inserted[0].image_url,
+        tag: inserted[0].tag || '',
+        desc: inserted[0].description || '',
+        createdAt: inserted[0].created_at
+      })
     }
+    addPhotosToLocal(folderName, newPhotos)
+    alert(`✅ Загружено ${newPhotos.length} фото`)
+  } catch (err) {
+    console.error('Ошибка загрузки:', err)
+    alert(`❌ Ошибка: ${err.message}\n\nПроверьте:\n- Бакет "photos" существует и публичный\n- RLS для Storage отключён\n- Таблицы folders/photos существуют`)
+  } finally {
+    loadingDiv.remove()
   }
+}
 
   async function deleteFolderPermanently(folderName) {
     const folderPhotos = appData.folders[folderName]?.photos || []
