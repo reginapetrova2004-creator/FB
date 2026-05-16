@@ -278,8 +278,10 @@
     return true
   }
   
- await addPhotoToSupabase(targetFolder, Array.from(files), tag, desc) {
+ async function addPhotoToSupabase(folderName, files, tag, desc) {
     if (!files.length) return
+    // остальной код оставьте без изменений
+}
     
     // Показываем индикатор загрузки
     const loadingMsg = document.createElement('div')
