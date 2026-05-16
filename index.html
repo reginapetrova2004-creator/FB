@@ -224,16 +224,23 @@
   // ========== РАБОТА С SUPABASE STORAGE ==========
   function slugify(str) { return str.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') }
 
-  async function uploadFileToStorage(file, folderName) {
-    const safeFolder = slugify(folderName)
-    const ext = file.name.split('.').pop()
-    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${ext}`
-    const filePath = `${safeFolder}/${fileName}`
-    const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(filePath, file, { cacheControl: '3600', upsert: false })
-    if (error) throw new Error(`Storage upload error: ${error.message}`)
-    const { data: publicUrl } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(filePath)
-    return publicUrl.publicUrl
+  async function uploadFileToStorage(file, folderName, retries = 5) {
+  const safeFolder = slugify(folderName);
+  const ext = file.name.split('.').pop();
+  const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${ext}`;
+  const filePath = `${safeFolder}/${fileName}`;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const { error } = await supabase.storage.from(STORAGE_BUCKET).upload(filePath, file, { cacheControl: '3600', upsert: false });
+      if (error) throw error;
+      const { data: publicUrl } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(filePath);
+      return publicUrl.publicUrl;
+    } catch (err) {
+      if (attempt === retries) throw err;
+      await new Promise(r => setTimeout(r, 1000 * attempt));
+    }
   }
+}
 
   async function addPhotoToSupabase(folderName, filesArray, tag, desc) {
   if (!filesArray.length) return;
