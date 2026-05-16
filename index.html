@@ -236,21 +236,52 @@
   }
 
   async function addPhotoToSupabase(folderName, filesArray, tag, desc) {
-    if (!filesArray.length) return
-    const hide = showLoading(`Загрузка ${filesArray.length} фото...`)
-    try {
-      const results = await Promise.allSettled(filesArray.map(file => uploadFileToStorage(file, folderName)))
-      const successfulUrls = results.filter(r => r.status === 'fulfilled').map(r => r.value)
-      const failed = results.filter(r => r.status === 'rejected').length
-      if (successfulUrls.length === 0) throw new Error('Не удалось загрузить ни одного фото')
-      const records = successfulUrls.map(url => ({ folder_name: folderName, image_url: url, tag, description: desc }))
-      const { data: inserted, error: dbError } = await supabase.from('photos').insert(records).select()
-      if (dbError) throw new Error(dbError.message)
-      const newPhotos = inserted.map(p => ({ id: p.id, url: p.image_url, tag: p.tag || '', desc: p.description || '', createdAt: p.created_at }))
-      addPhotosToLocal(folderName, newPhotos)
-      if (failed) alert(`Загружено ${successfulUrls.length} из ${filesArray.length}. ${failed} фото не загружены.`)
-    } catch (err) { alert(`Ошибка: ${err.message}`) } finally { hide() }
+  if (!filesArray.length) return;
+  const hide = showLoading(`Загрузка ${filesArray.length} фото...`);
+  let loaded = 0;
+  let failed = 0;
+
+  for (let i = 0; i < filesArray.length; i++) {
+    const file = filesArray[i];
+    let success = false;
+    // Пытаемся загрузить файл до 5 раз
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      try {
+        // Загружаем в Storage через вашу существующую функцию uploadFileToStorage
+        const url = await uploadFileToStorage(file, folderName);
+        // Сохраняем метаданные в БД
+        const { data: inserted, error: dbError } = await supabase
+          .from('photos')
+          .insert({ folder_name: folderName, image_url: url, tag, description: desc })
+          .select();
+        if (dbError) throw dbError;
+        const newPhotos = inserted.map(p => ({
+          id: p.id,
+          url: p.image_url,
+          tag: p.tag || '',
+          desc: p.description || '',
+          createdAt: p.created_at
+        }));
+        addPhotosToLocal(folderName, newPhotos);
+        loaded++;
+        success = true;
+        break; // выходим из цикла попыток
+      } catch (err) {
+        console.warn(`Попытка ${attempt} для ${file.name} не удалась:`, err);
+        if (attempt === 5) {
+          failed++;
+        } else {
+          // ждём перед повтором: 1с, 2с, 3с, 4с
+          await new Promise(r => setTimeout(r, 1000 * attempt));
+        }
+      }
+    }
+    // Пауза между разными файлами (2 секунды)
+    if (i < filesArray.length - 1) await new Promise(r => setTimeout(r, 2000));
   }
+  hide();
+  alert(`Загружено ${loaded} из ${filesArray.length}. ${failed ? `Не загружено: ${failed}` : ''}`);
+}
 
   async function createFolderInSupabase(folderName) {
     const { error } = await supabase.from('folders').insert({ name: folderName, created_at: new Date().toISOString() })
