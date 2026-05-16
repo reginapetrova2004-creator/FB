@@ -1,6 +1,3 @@
-Данные загружены
-FB/:1 [Intervention] Images loaded lazily and replaced with placeholders. Load events are deferred. See https://go.microsoft.com/fwlink/?linkid=2048113 
-
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -281,7 +278,7 @@ FB/:1 [Intervention] Images loaded lazily and replaced with placeholders. Load e
     return true
   }
   
-  async function addPhotoToSupabase(folderName, files, tag, desc) {
+ await addPhotoToSupabase(targetFolder, Array.from(files), tag, desc) {
     if (!files.length) return
     
     // Показываем индикатор загрузки
@@ -590,22 +587,26 @@ FB/:1 [Intervention] Images loaded lazily and replaced with placeholders. Load e
   }
   
   async function showAddPhotoDialog(targetFolder) {
-    const html = `
-      <div style="display:flex; flex-direction:column; gap:14px;">
-        <input type="file" id="photoFilesInput" accept="image/*" multiple style="padding:6px;">
-        <input type="text" id="photoTagInput" placeholder="Тег" style="padding:10px; border-radius:12px;">
-        <textarea id="photoDescInput" placeholder="Описание" rows="3" style="padding:10px; border-radius:12px;"></textarea>
-        <small>Можно выбрать несколько фото</small>
-      </div>
-    `
-    const ok = await showModal(`Добавить фото в папку «${escapeHtml(targetFolder)}»`, html, true, true)
-    if (!ok) return
-    const files = document.getElementById('photoFilesInput').files
-    if (!files.length) { alert('Выберите хотя бы одно изображение'); return }
-    const tag = document.getElementById('photoTagInput').value.trim()
-    const desc = document.getElementById('photoDescInput').value.trim()
-    await addPhotoToSupabase(targetFolder, files, tag, desc)
-  }
+    const html = `<div>
+        <input type="file" id="photoFilesInput" accept="image/*" multiple>
+        <div id="previewContainer" class="preview-grid"></div>
+        <input type="text" id="photoTagInput" placeholder="Тег (для всех фото)">
+        <textarea id="photoDescInput" placeholder="Описание (для всех фото)" rows="2"></textarea>
+        <small>Можно выбрать несколько фото. Предпросмотр появится сразу.</small>
+    </div>`;
+    
+    const ok = await showModal(`Добавить фото в «${escapeHtml(targetFolder)}»`, html, true, true);
+    if (!ok) return;
+    
+    const files = document.getElementById('photoFilesInput').files;
+    if (!files.length) { alert('Выберите хотя бы одно изображение'); return; }
+    
+    const tag = document.getElementById('photoTagInput').value.trim();
+    const desc = document.getElementById('photoDescInput').value.trim();
+    
+    // ВАЖНО: передаём Array.from(files)
+    await addPhotoToSupabase(targetFolder, Array.from(files), tag, desc);
+}
   
   async function quickAdd() {
     if (currentMode === 'folder' && currentFolder) {
